@@ -573,32 +573,312 @@ function CuotaAutonomos({ ingresos, gastos, tramos }) {
   );
 }
 
-// --- OCR (placeholder) ---
+// --- OCR REAL ---
+const VISION_KEY = import.meta.env.VITE_GOOGLE_VISION_KEY;
+
+async function ocrImage(base64data) {
+  const body = {
+    requests: [{
+      image: { content: base64data },
+      features: [{ type: "TEXT_DETECTION", maxResults: 1 }]
+    }]
+  };
+  const r = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${VISION_KEY}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const d = await r.json();
+  const text = d.responses?.[0]?.fullTextAnnotation?.text || "";
+  return text;
+}
+
+function parseFactura(text) {
+  const t = text.replace(/\r/g, "");
+  const num = (t.match(/(?:factura|fra|invoice|nº|n°|numero)[:\s]*([A-Z0-9\-\/]+)/i) || [])[1] || "";
+  const fechaM = t.match(/(?:fecha(?:\s+de\s+factura)?)[:\s]*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i) || t.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/);
+  const fecha = fechaM ? fechaM[1] : "";
+  const cifM = t.match(/([A-Z]\d{7,8}[A-Z0-9]|\d{8}[A-Z])/);
+  const cif = cifM ? cifM[0] : "";
+
+  const findAmount = (patterns) => {
+    for (const p of patterns) {
+      const m = t.match(p);
+      if (m) {
+        const val = m[1].replace(/\./g, "").replace(",", ".");
+        const n = parseFloat(val);
+        if (!isNaN(n)) return n;
+      }
+    }
+    return 0;
+  };
+
+  const base = findAmount([
+    /(?:subtotal|base\s*imponible|importe\s*neto)[:\s]*([0-9.,]+)\s*€?/i,
+    /(?:subtotal|base)[:\s]*([0-9.,]+)/i
+  ]);
+
+  const iva = findAmount([
+    /(?:iva|i\.v\.a\.?)\s*(?:\d+%)?[:\s]*([0-9.,]+)\s*€?/i,
+    /(?:iva\s*\d+%?)[:\s]*([0-9.,]+)/i
+  ]);
+
+  const irpf = findAmount([
+    /(?:irpf|i\.r\.p\.f\.?)\s*(?:-?\s*\d+%)?[:\s]*-?\s*([0-9.,]+)\s*€?/i,
+    /(?:retenci[oó]n)[:\s]*-?\s*([0-9.,]+)/i
+  ]);
+
+  const total = findAmount([
+    /(?:total(?:\s+factura)?)[:\s]*([0-9.,]+)\s*€?/i
+  ]);
+
+  // Try to find client name - look after "Para" or "Cliente" or "Bill to"
+  const clienteM = t.match(/(?:para|cliente|bill\s*to|destinatario)[:\s]*\n?\s*([A-ZÁÉÍÓÚÑa-záéíóúñ\s]+)/i);
+  let cliente = clienteM ? clienteM[1].trim().split("\n")[0].trim() : "";
+  if (cliente.length > 50) cliente = cliente.substring(0, 50);
+
+  // Find concepto/descripcion
+  const descM = t.match(/(?:descripci[oó]n|concepto|servicio)[:\s]*\n?\s*([^\n]+)/i);
+  const descripcion = descM ? descM[1].trim() : "";
+
+  return { numero: num, fecha, cliente, cif, base, iva, irpf, total, descripcion };
+}
+
+function convertDateFormat(d) {
+  if (!d) return "";
+  const parts = d.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/);
+  if (!parts) return d;
+  let [, day, month, year] = parts;
+  if (year.length === 2) year = "20" + year;
+  return `${year}-${month.padStart(2,"0")}-${day.padStart(2,"0")}`;
+}
+
 function OCRView({ onRefresh }) {
   const [drag, setDrag] = useState(false);
+  const [processing, setProcessing] = useState(false);
   const [res, setRes] = useState(null);
-  const sim = () => setRes({ numero:"F00072026", fecha:"02/02/2026", cliente:"Beatriz Ruiz Caballero", cif:"17453133C", base:190, iva:39.90, irpf:28.50, total:201.40 });
+  const [tipo, setTipo] = useState("ingreso");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+
+  // Editable fields for ingreso
+  const [numero, setNumero] = useState("");
+  const [fecha, setFecha] = useState("");
+  const [cliente, setCliente] = useState("");
+  const [cif, setCif] = useState("");
+  const [base, setBase] = useState("");
+  const [iva, setIva] = useState("");
+  const [irpf, setIrpf] = useState("");
+  const [total, setTotal] = useState("");
+  const [descripcion, setDescripcion] = useState("");
+  const [estado, setEstado] = useState("Pendiente");
+  const [fechaVenc, setFechaVenc] = useState("");
+
+  // Editable fields for gasto
+  const [concepto, setConcepto] = useState("");
+  const [tipoGasto, setTipoGasto] = useState("");
+  const [periodicidad, setPeriodicidad] = useState("Puntual");
+
+  const resetFields = () => {
+    setNumero(""); setFecha(""); setCliente(""); setCif(""); setBase("");
+    setIva(""); setIrpf(""); setTotal(""); setDescripcion(""); setEstado("Pendiente");
+    setFechaVenc(""); setConcepto(""); setTipoGasto(""); setPeriodicidad("Puntual");
+    setSaved(false); setError("");
+  };
+
+  const handleFile = async (file) => {
+    resetFields();
+    setProcessing(true);
+    setRes(null);
+    setError("");
+    try {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        let base64 = e.target.result.split(",")[1];
+        
+        // For PDFs, we need to convert first page to image
+        // Google Vision can handle PDFs directly as images
+        if (file.type === "application/pdf") {
+          // Send PDF as-is to Vision API (it handles PDFs)
+          base64 = e.target.result.split(",")[1];
+        }
+        
+        try {
+          const text = await ocrImage(base64);
+          if (!text) {
+            setError("No se pudo leer texto del documento. Intenta con mejor calidad.");
+            setProcessing(false);
+            return;
+          }
+          const parsed = parseFactura(text);
+          setRes(parsed);
+          
+          // Set editable fields
+          setNumero(parsed.numero);
+          setFecha(convertDateFormat(parsed.fecha));
+          setCliente(parsed.cliente);
+          setCif(parsed.cif);
+          setBase(String(parsed.base || ""));
+          setIva(String(parsed.iva || ""));
+          setIrpf(String(parsed.irpf || ""));
+          setTotal(String(parsed.total || ""));
+          setDescripcion(parsed.descripcion);
+          setConcepto(parsed.descripcion);
+        } catch (err) {
+          setError("Error al procesar: " + err.message);
+        }
+        setProcessing(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      setError("Error al leer archivo: " + err.message);
+      setProcessing(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDrag(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  };
+
+  const handleClick = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*,.pdf";
+    input.onchange = (e) => {
+      const file = e.target.files[0];
+      if (file) handleFile(file);
+    };
+    input.click();
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      if (tipo === "ingreso") {
+        const fields = {
+          "Nº Factura": numero,
+          "Fecha": fecha || undefined,
+          "Base Imponible": Number(base) || 0,
+          "Estado": estado,
+        };
+        if (fechaVenc) fields["Fecha Vencimiento"] = fechaVenc;
+        await createRecord("Ingresos", fields);
+      } else {
+        const fields = {
+          "Concepto": concepto || descripcion || "Gasto sin concepto",
+          "Fecha": fecha || undefined,
+          "Base Imponible": Number(base) || 0,
+          "IVA Soportado (€)": Number(iva) || 0,
+        };
+        if (tipoGasto) fields["Tipo de Gasto"] = tipoGasto;
+        if (periodicidad) fields["Periodicidad"] = periodicidad;
+        await createRecord("Gastos", fields);
+      }
+      setSaved(true);
+      onRefresh();
+    } catch (err) {
+      setError("Error al guardar: " + err.message);
+    }
+    setSaving(false);
+  };
+
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:24 }}>
-      <h2 style={{ fontSize:22, fontWeight:700, color:B.text, margin:0, fontFamily:B.tMono, textTransform:"uppercase" }}>Lector de Facturas</h2>
-      <div onDragOver={e => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={e => { e.preventDefault(); setDrag(false); sim(); }} onClick={sim}
-        style={{ background:drag ? B.yellow+"44" : B.card, border:`3px dashed ${drag ? B.text : B.border}`, borderRadius:12, padding:60, textAlign:"center", cursor:"pointer", backdropFilter:"blur(14px)", transition:"all 0.3s" }}>
-        <div style={{ fontSize:48, marginBottom:12 }}>📄</div>
-        <div style={{ fontSize:15, fontWeight:700, color:B.text, fontFamily:B.tSans }}>Arrastra tu factura aquí</div>
-        <div style={{ fontSize:13, color:B.muted, marginTop:4, fontFamily:B.tSans }}>PDF o imagen · Haz clic para simular</div>
+      <h2 style={{ fontSize:22, fontWeight:700, color:B.text, margin:0, fontFamily:B.tMono, textTransform:"uppercase" }}>Lector de Facturas (OCR)</h2>
+
+      {/* Tipo selector */}
+      <div style={{ display:"flex", gap:8 }}>
+        <button onClick={() => { setTipo("ingreso"); resetFields(); setRes(null); }}
+          style={{ ...B.btn, flex:1, background: tipo === "ingreso" ? B.text : "transparent", color: tipo === "ingreso" ? "#fff" : B.text, border:`2px solid ${B.text}` }}>
+          FACTURA (INGRESO)
+        </button>
+        <button onClick={() => { setTipo("gasto"); resetFields(); setRes(null); }}
+          style={{ ...B.btn, flex:1, background: tipo === "gasto" ? B.text : "transparent", color: tipo === "gasto" ? "#fff" : B.text, border:`2px solid ${B.text}` }}>
+          TICKET / GASTO
+        </button>
       </div>
-      {res && <Card style={{ border:`2px solid ${B.green}` }}>
-        <Label><span style={{ color:B.green }}>DATOS EXTRAÍDOS</span></Label>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginTop:14 }}>
-          {Object.entries(res).map(([k, v]) => (
-            <div key={k} style={{ background:"rgba(0,0,0,0.03)", padding:"10px 14px", borderRadius:8 }}>
-              <div style={{ fontSize:10, color:B.muted, textTransform:"uppercase", fontWeight:700, fontFamily:B.tMono }}>{k}</div>
-              <div style={{ fontSize:15, fontWeight:700, color:B.text, marginTop:2, fontFamily:B.tMono }}>{typeof v === "number" ? fmt(v) : v}</div>
+
+      {/* Drop zone */}
+      <div onDragOver={e => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
+        onDrop={handleDrop} onClick={handleClick}
+        style={{
+          background: drag ? B.yellow+"44" : B.card,
+          border: `3px dashed ${drag ? B.text : B.border}`,
+          borderRadius:12, padding: processing ? 40 : 60, textAlign:"center",
+          cursor:"pointer", backdropFilter:"blur(14px)", transition:"all 0.3s"
+        }}>
+        {processing ? (
+          <>
+            <div style={{ fontSize:32, marginBottom:8 }}>⏳</div>
+            <div style={{ fontSize:15, fontWeight:700, color:B.text, fontFamily:B.tSans }}>Leyendo documento...</div>
+            <div style={{ fontSize:13, color:B.muted, marginTop:4, fontFamily:B.tSans }}>Extrayendo datos con OCR</div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize:48, marginBottom:12 }}>{tipo === "ingreso" ? "📄" : "🧾"}</div>
+            <div style={{ fontSize:15, fontWeight:700, color:B.text, fontFamily:B.tSans }}>
+              {tipo === "ingreso" ? "Arrastra tu factura aquí" : "Arrastra tu ticket o factura de gasto"}
             </div>
-          ))}
-        </div>
-        <button style={{ ...B.btn, marginTop:16, width:"100%" }}>GUARDAR EN AIRTABLE</button>
-      </Card>}
+            <div style={{ fontSize:13, color:B.muted, marginTop:4, fontFamily:B.tSans }}>PDF o imagen · Haz clic para seleccionar archivo</div>
+          </>
+        )}
+      </div>
+
+      {error && <div style={{ background:B.red+"15", color:B.red, padding:"12px 16px", borderRadius:8, fontSize:13, fontWeight:600, fontFamily:B.tSans }}>{error}</div>}
+
+      {/* Resultados editables */}
+      {res && !saved && (
+        <Card style={{ border:`2px solid ${B.green}` }}>
+          <Label><span style={{ color:B.green }}>DATOS EXTRAÍDOS — REVISA Y CORRIGE</span></Label>
+          
+          {tipo === "ingreso" ? (
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginTop:14 }}>
+              <InputField label="Nº Factura" value={numero} onChange={setNumero} placeholder="F00012026" />
+              <InputField label="Fecha" value={fecha} onChange={setFecha} type="date" />
+              <InputField label="Cliente" value={cliente} onChange={setCliente} placeholder="Nombre del cliente" />
+              <InputField label="CIF/NIF" value={cif} onChange={setCif} placeholder="12345678A" />
+              <InputField label="Base Imponible (€)" value={base} onChange={setBase} type="number" />
+              <InputField label="IVA (€)" value={iva} onChange={setIva} type="number" />
+              <InputField label="IRPF (€)" value={irpf} onChange={setIrpf} type="number" />
+              <InputField label="Total (€)" value={total} onChange={setTotal} type="number" />
+              <SelectField label="Estado" value={estado} onChange={setEstado} options={["Cobrada","Pendiente","Vencida"]} />
+              <InputField label="Fecha Vencimiento" value={fechaVenc} onChange={setFechaVenc} type="date" />
+            </div>
+          ) : (
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginTop:14 }}>
+              <InputField label="Concepto" value={concepto} onChange={setConcepto} placeholder="Ej: Material oficina" />
+              <InputField label="Fecha" value={fecha} onChange={setFecha} type="date" />
+              <InputField label="Base Imponible (€)" value={base} onChange={setBase} type="number" />
+              <InputField label="IVA Soportado (€)" value={iva} onChange={setIva} type="number" />
+              <SelectField label="Tipo de Gasto" value={tipoGasto} onChange={setTipoGasto} options={["Fijo","Variable","Impuesto"]} />
+              <SelectField label="Periodicidad" value={periodicidad} onChange={setPeriodicidad} options={["Mensual","Trimestral","Anual","Puntual"]} />
+            </div>
+          )}
+
+          <button onClick={handleSave} disabled={saving}
+            style={{ ...B.btn, width:"100%", marginTop:16, opacity:saving ? 0.5 : 1 }}>
+            {saving ? "GUARDANDO..." : tipo === "ingreso" ? "GUARDAR INGRESO EN AIRTABLE" : "GUARDAR GASTO EN AIRTABLE"}
+          </button>
+        </Card>
+      )}
+
+      {/* Saved confirmation */}
+      {saved && (
+        <Card style={{ border:`2px solid ${B.green}` }}>
+          <div style={{ textAlign:"center", padding:20 }}>
+            <div style={{ fontSize:48, marginBottom:12 }}>✅</div>
+            <div style={{ fontSize:16, fontWeight:700, color:B.green, fontFamily:B.tSans }}>
+              {tipo === "ingreso" ? "Factura guardada en Ingresos" : "Gasto guardado en Gastos"}
+            </div>
+            <button onClick={() => { resetFields(); setRes(null); }}
+              style={{ ...B.btn, marginTop:16 }}>ESCANEAR OTRO DOCUMENTO</button>
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
