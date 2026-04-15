@@ -21,8 +21,14 @@ async function fetchTable(table) {
   return all;
 }
 async function createRecord(table, fields) {
+  console.log("Creating record in", table, "with fields:", JSON.stringify(fields));
   const r = await fetch(`${API}/${encodeURIComponent(table)}`, { method: "POST", headers: hdrs, body: JSON.stringify({ records: [{ fields }] }) });
-  return r.json();
+  const d = await r.json();
+  console.log("Airtable response:", JSON.stringify(d));
+  if (d.error) throw new Error(d.error.message || d.error.type || "Error de Airtable");
+  if (d.records && d.records[0] && d.records[0].id) return d;
+  if (d.records && d.records[0] && d.records[0].error) throw new Error(d.records[0].error.message || "Campo no válido");
+  return d;
 }
 async function updateRecord(table, id, fields) {
   const r = await fetch(`${API}/${encodeURIComponent(table)}`, { method: "PATCH", headers: hdrs, body: JSON.stringify({ records: [{ id, fields }] }) });
@@ -529,10 +535,30 @@ function OCRView({ onRefresh }) {
   const handleDrop=(e)=>{e.preventDefault();setDrag(false);const f=e.dataTransfer.files[0];if(f)handleFile(f);};
   const handleClick=()=>{const i=document.createElement("input");i.type="file";i.accept="image/*,.pdf";i.onchange=e=>{const f=e.target.files[0];if(f)handleFile(f)};i.click();};
 
-  const handleSave=async()=>{setSaving(true);setError("");try{
-    if(tipo==="ingreso"){const f={"Nº Factura":numero,"Base Imponible":Number(base)||0,"Estado":estado};if(fecha)f["Fecha"]=fecha;if(fechaV)f["Fecha Vencimiento"]=fechaV;await createRecord("Ingresos",f);}
-    else{const f={"Concepto":concepto||desc||"Gasto","Base Imponible":Number(base)||0,"IVA Soportado (€)":Number(iva)||(Number(base)*0.21)||0};if(fecha)f["Fecha"]=fecha;if(tipoG)f["Tipo de Gasto"]=tipoG;if(period)f["Periodicidad"]=period;await createRecord("Gastos",f);}
-    setSaved(true);onRefresh();}catch(e){setError("Error: "+e.message);}setSaving(false);};
+  const handleSave=async()=>{setSaving(true);setError("");
+    try{
+      if(tipo==="ingreso"){
+        const f={"Nº Factura":numero||"","Base Imponible":Number(base)||0,"Estado":estado||"Pendiente"};
+        if(fecha)f["Fecha"]=fecha;
+        if(fechaV)f["Fecha Vencimiento"]=fechaV;
+        console.log("Saving ingreso:", JSON.stringify(f));
+        const result = await createRecord("Ingresos",f);
+        console.log("Save result:", JSON.stringify(result));
+        if(result.error) throw new Error(result.error.message);
+      } else {
+        const f={"Concepto":concepto||desc||"Gasto","Base Imponible":Number(base)||0,"IVA Soportado (€)":Number(iva)||(Number(base)*0.21)||0};
+        if(fecha)f["Fecha"]=fecha;
+        if(tipoG)f["Tipo de Gasto"]=tipoG;
+        if(period)f["Periodicidad"]=period;
+        console.log("Saving gasto:", JSON.stringify(f));
+        const result = await createRecord("Gastos",f);
+        console.log("Save result:", JSON.stringify(result));
+        if(result.error) throw new Error(result.error.message);
+      }
+      setSaved(true);onRefresh();
+    }catch(e){console.error("Save error:",e);setError("Error al guardar: "+e.message);}
+    setSaving(false);
+  };
 
   const showFormReady=(mode==="ocr"&&res&&!proc)||mode==="manual";
 
