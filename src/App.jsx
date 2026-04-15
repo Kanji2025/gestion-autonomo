@@ -39,6 +39,28 @@ async function deleteRecord(table, id) {
   return r.json();
 }
 
+async function findOrCreateClient(nombre) {
+  if (!nombre || !nombre.trim()) return null;
+  const clean = nombre.trim();
+  // Search existing clients
+  const formula = encodeURIComponent(`{Nombre}="${clean}"`);
+  const url = `${API}/${encodeURIComponent("Clientes")}?filterByFormula=${formula}`;
+  const r = await fetch(url, { headers: hdrs });
+  const d = await r.json();
+  if (d.records && d.records.length > 0) {
+    console.log("Client found:", d.records[0].id);
+    return d.records[0].id;
+  }
+  // Create new client
+  console.log("Creating new client:", clean);
+  const cr = await createRecord("Clientes", { "Nombre": clean, "Estado": "Activo" });
+  if (cr.records && cr.records[0]) {
+    console.log("Client created:", cr.records[0].id);
+    return cr.records[0].id;
+  }
+  return null;
+}
+
 // ============================================================
 // UTILS
 // ============================================================
@@ -497,10 +519,10 @@ function parseFactura(text) {
   const fecha = fechaM?fechaM[1]:"";
   const cifM = t.match(/(\d{8}[A-Z])/); const cif = cifM?cifM[0]:"";
   const fa = (ps)=>{for(const p of ps){const m=t.match(p);if(m){const v=m[1].replace(/\s/g,"").replace(/\./g,"").replace(",",".");const n=parseFloat(v);if(!isNaN(n)&&n>0)return n;}}return 0;};
-  const base=fa([/(?:subtotal)[:\s]*([0-9.,]+)\s*€/i,/(?:base\s*imponible)[:\s]*([0-9.,]+)/i,/(?:importe)[:\s]*([0-9.,]+)\s*€/i]);
-  const iva=fa([/(?:iva)\s*\d+\s*%?[:\s]*([0-9.,]+)\s*€/i,/(?:iva)[:\s]*([0-9.,]+)/i]);
-  const irpf=fa([/(?:irpf)\s*-?\s*\d+\s*%?[:\s]*-?\s*([0-9.,]+)\s*€/i,/(?:retenci[oó]n)[:\s]*-?\s*([0-9.,]+)/i]);
-  const total=fa([/(?:total)[:\s]*([0-9.,]+)\s*€/i]);
+  const base=fa([/(?:subtotal)\s*([0-9.,]+)\s*€/i,/(?:subtotal)[:\s]+([0-9.,]+)/i,/(?:base\s*imponible)[:\s]*([0-9.,]+)/i,/(?:importe)\s+([0-9.,]+)\s*€/i]);
+  const iva=fa([/(?:iva)\s*\d+\s*%?\s+([0-9.,]+)\s*€/i,/(?:iva)\s*\d+%?\s*([0-9.,]+)/i,/(?:iva)[:\s]+([0-9.,]+)/i]);
+  const irpf=fa([/(?:irpf)\s*-?\s*\d+\s*%?\s+(-?[0-9.,]+)\s*€/i,/(?:irpf)\s*-?\d+%?\s*(-?[0-9.,]+)/i,/(?:retenci[oó]n)[:\s]*-?\s*([0-9.,]+)/i]);
+  const total=fa([/(?:total)\s+([0-9.,]+)\s*€/i,/(?:total)[:\s]+([0-9.,]+)/i]);
   const clM=t.match(/(?:para|cliente|destinatario)[:\s]*\n?\s*([A-ZÁÉÍÓÚÑa-záéíóúñ\s]+)/i);
   let cliente=clM?clM[1].trim().split("\n")[0].trim():"";if(cliente.length>60)cliente=cliente.substring(0,60);
   const dsM=t.match(/(?:descripci[oó]n|concepto)[:\s]*\n?\s*([^\n]+)/i);
@@ -517,14 +539,16 @@ function OCRView({ onRefresh }) {
   const [irpf,setIrpf]=useState("");const [total,setTotal]=useState("");const [desc,setDesc]=useState("");
   const [estado,setEstado]=useState("Pendiente");const [fechaV,setFechaV]=useState("");
   const [concepto,setConcepto]=useState("");const [tipoG,setTipoG]=useState("");const [period,setPeriod]=useState("Puntual");
+  const [fechaCobro,setFechaCobro]=useState("");
 
-  const reset=()=>{setNumero("");setFecha(hoy());setCliente("");setCif("");setBase("");setIva("");setIrpf("");setTotal("");setDesc("");setEstado("Pendiente");setFechaV("");setConcepto("");setTipoG("");setPeriod("Puntual");setSaved(false);setError("");setRes(null);};
+  const reset=()=>{setNumero("");setFecha(hoy());setCliente("");setCif("");setBase("");setIva("");setIrpf("");setTotal("");setDesc("");setEstado("Pendiente");setFechaV("");setFechaCobro("");setConcepto("");setTipoG("");setPeriod("Puntual");setSaved(false);setError("");setRes(null);};
 
   const handleFile=async(file)=>{reset();setProc(true);setMode("ocr");setError("");
     try{let b64;
       if(file.type==="application/pdf"){b64=await pdfToImage(await file.arrayBuffer());}
       else{const du=await new Promise((r,j)=>{const rd=new FileReader();rd.onload=()=>r(rd.result);rd.onerror=j;rd.readAsDataURL(file)});b64=du.split(",")[1];}
       const text=await ocrImage(b64);
+      console.log("OCR text extracted:", text);
       if(!text){setError("No se pudo leer el documento.");setProc(false);return;}
       const p=parseFactura(text);setRes(p);
       setNumero(p.numero);setFecha(convDate(p.fecha));setCliente(p.cliente);setCif(p.cif);
@@ -538,15 +562,29 @@ function OCRView({ onRefresh }) {
   const handleSave=async()=>{setSaving(true);setError("");
     try{
       if(tipo==="ingreso"){
-        const f={"Nº Factura":numero||"","Base Imponible":Number(base)||0,"Estado":estado||"Pendiente"};
+        const f={
+          "Nº Factura":numero||"",
+          "Base Imponible":Number(base)||0,
+          "Estado":estado||"Pendiente",
+        };
         if(fecha)f["Fecha"]=fecha;
         if(fechaV)f["Fecha Vencimiento"]=fechaV;
+        if(fechaCobro)f["Fecha Cobro"]=fechaCobro;
+        // Auto find or create client and link
+        if(cliente && cliente.trim()){
+          const clienteId = await findOrCreateClient(cliente.trim());
+          if(clienteId) f["Cliente"]=[clienteId];
+        }
         console.log("Saving ingreso:", JSON.stringify(f));
         const result = await createRecord("Ingresos",f);
         console.log("Save result:", JSON.stringify(result));
         if(result.error) throw new Error(result.error.message);
       } else {
-        const f={"Concepto":concepto||desc||"Gasto","Base Imponible":Number(base)||0,"IVA Soportado (€)":Number(iva)||(Number(base)*0.21)||0};
+        const f={
+          "Concepto":concepto||desc||"Gasto",
+          "Base Imponible":Number(base)||0,
+          "IVA Soportado (€)":Number(iva)||(Number(base)*0.21)||0,
+        };
         if(fecha)f["Fecha"]=fecha;
         if(tipoG)f["Tipo de Gasto"]=tipoG;
         if(period)f["Periodicidad"]=period;
@@ -565,7 +603,7 @@ function OCRView({ onRefresh }) {
   const IngresoForm=()=>(<div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginTop:14 }}>
     <InputField label="Nº Factura" value={numero} onChange={setNumero} placeholder="F00012026"/>
     <InputField label="Fecha" value={fecha} onChange={setFecha} type="date"/>
-    <InputField label="Cliente" value={cliente} onChange={setCliente} placeholder="Nombre"/>
+    <InputField label="Cliente (referencia)" value={cliente} onChange={setCliente} placeholder="Nombre"/>
     <InputField label="CIF/NIF" value={cif} onChange={setCif} placeholder="12345678A"/>
     <InputField label="Base Imponible (€)" value={base} onChange={setBase} type="number" placeholder="0"/>
     <InputField label="IVA (€)" value={iva} onChange={setIva} type="number" placeholder="Auto: 21%"/>
@@ -573,6 +611,7 @@ function OCRView({ onRefresh }) {
     <InputField label="Total (€)" value={total} onChange={setTotal} type="number"/>
     <SelectField label="Estado" value={estado} onChange={setEstado} options={["Cobrada","Pendiente","Vencida"]}/>
     <InputField label="Fecha Vencimiento" value={fechaV} onChange={setFechaV} type="date"/>
+    <InputField label="Fecha Cobro" value={fechaCobro} onChange={setFechaCobro} type="date"/>
   </div>);
 
   const GastoForm=()=>(<div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginTop:14 }}>
