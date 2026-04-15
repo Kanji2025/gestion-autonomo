@@ -128,7 +128,10 @@ function Dashboard({ingresos,gastos,tramos,salObj,setSalObj,filtro,setFiltro}){
   // IRPF retenido = lo que retienes a proveedores (en gastos), NO el de tus facturas
   const irpfRet=fg.reduce((s,r)=>s+(r.fields["IRPF Retenido (€)"]||0),0);
   const tGast=fg.reduce((s,r)=>s+(r.fields["Base Imponible"]||0),0);
-  const benef=tFact-tGast;
+  // IRPF que te retienen tus clientes (reduce tu beneficio real)
+  const irpfClientes=fi.reduce((s,r)=>s+(r.fields["IRPF (€)"]||0),0);
+  // Beneficio neto REAL = Facturado - IRPF retenido por clientes - Gastos
+  const benef=tFact-irpfClientes-tGast;
   // HUCHA CORREGIDA: IVA Rep - IVA Sop + IRPF retenido a proveedores
   const hucha=ivaR-ivaS+irpfRet;
   const venc=fi.filter(r=>r.fields["Estado"]==="Vencida").length;
@@ -146,7 +149,7 @@ function Dashboard({ingresos,gastos,tramos,salObj,setSalObj,filtro,setFiltro}){
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(195px, 1fr))",gap:14}}>
       <Card><Lbl>Facturado Total</Lbl><Big color={B.purple}>{fmt(tFact)}</Big><Sub>Base imponible</Sub></Card>
       <Card><Lbl>Cobrado Real</Lbl><Big color={B.green}>{fmt(tCob)}</Big><Sub>En tu cuenta</Sub></Card>
-      <Card><Lbl>Beneficio Neto</Lbl><Big color={benef>0?B.green:B.red}>{fmt(benef)}</Big><Sub>{fmt(bMes)}/mes</Sub></Card>
+      <Card><Lbl>Beneficio Neto</Lbl><Big color={benef>0?B.green:B.red}>{fmt(benef)}</Big><Sub>{fmt(bMes)}/mes (IRPF descontado)</Sub></Card>
       <Card><Lbl>Facturas Vencidas</Lbl><Big color={B.red}>{venc}</Big><Sub>Sin cobrar</Sub></Card>
     </div>
     {/* HUCHA CORREGIDA */}
@@ -194,17 +197,26 @@ function Dashboard({ingresos,gastos,tramos,salObj,setSalObj,filtro,setFiltro}){
 // CLIENTES CON AÑADIR MANUAL Y BORRAR FACTURAS
 // ============================================================
 function Clientes({clientes,ingresos,onRefresh}){
-  const [sel,setSel]=useState(null);const [del,setDel]=useState(null);
+  const [sel,setSel]=useState(null);const [del,setDel]=useState(null);const [updId,setUpdId]=useState(null);
   const [showAdd,setShowAdd]=useState(false);const [newName,setNewName]=useState("");const [saving,setSaving]=useState(false);
 
   const addCliente=async()=>{if(!newName.trim())return;setSaving(true);await createRecord("Clientes",{"Nombre":newName.trim()});setNewName("");setShowAdd(false);setSaving(false);onRefresh()};
   const delFactura=async(id)=>{setDel(id);await deleteRecord("Ingresos",id);await onRefresh();setDel(null)};
+  const cambiarEstado=async(id,nuevoEstado)=>{
+    setUpdId(id);
+    const fields={"Estado":nuevoEstado};
+    if(nuevoEstado==="Cobrada")fields["Fecha Cobro"]=hoy();
+    await fetch(`${API}/${encodeURIComponent("Ingresos")}`,{method:"PATCH",headers:hdrs,body:JSON.stringify({records:[{id,fields}]})});
+    await onRefresh();setUpdId(null);
+  };
 
   const cd=clientes.map(c=>{const n=c.fields["Nombre"]||"Sin nombre";const fIds=c.fields["Ingresos"]||[];const fs=ingresos.filter(r=>fIds.includes(r.id));
-    const tot=fs.reduce((s,f)=>s+(f.fields["Base Imponible"]||0),0);const v=fs.filter(f=>f.fields["Estado"]==="Vencida").length;const p=fs.filter(f=>f.fields["Estado"]==="Pendiente").length;
-    const cob=fs.filter(f=>f.fields["Estado"]==="Cobrada"&&f.fields["Fecha Cobro"]);const dm=cob.map(f=>diasEntre(f.fields["Fecha"],f.fields["Fecha Cobro"]));
-    const md=dm.length?Math.round(dm.reduce((a,b)=>a+b,0)/dm.length):null;
-    return{id:c.id,nombre:n,estado:c.fields["Estado"]||"",fs,tot,v,p,md,bc:v>0?B.red:p>0?B.amber:B.green};
+    const totBase=fs.reduce((s,f)=>s+(f.fields["Base Imponible"]||0),0);
+    const totIrpf=fs.reduce((s,f)=>s+(f.fields["IRPF (€)"]||0),0);
+    const benefNeto=totBase-totIrpf;
+    const p=fs.filter(f=>f.fields["Estado"]==="Pendiente").length;
+    const v=fs.filter(f=>f.fields["Estado"]==="Vencida").length;
+    return{id:c.id,nombre:n,fs,totBase,totIrpf,benefNeto,p,v,bc:v>0?B.red:p>0?B.amber:B.green};
   });
 
   return(<div style={{display:"flex",flexDirection:"column",gap:20}}>
@@ -222,18 +234,34 @@ function Clientes({clientes,ingresos,onRefresh}){
     {cd.length===0&&<Card><p style={{color:B.muted,fontFamily:B.tS}}>No hay clientes. Añádelos manualmente o se crean al subir facturas.</p></Card>}
     {cd.map(c=>(<div key={c.id} onClick={()=>setSel(sel===c.id?null:c.id)} style={{background:B.card,backdropFilter:"blur(14px)",borderRadius:10,padding:20,cursor:"pointer",border:`1px solid ${B.border}`,borderLeft:`4px solid ${c.bc}`}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div><div style={{fontWeight:600,fontSize:15,fontFamily:B.tS}}>{c.nombre}</div><div style={{fontSize:12,color:B.muted}}>{c.estado}</div></div>
-        <div style={{textAlign:"right"}}><div style={{fontWeight:700,fontFamily:B.tM}}>{fmt(c.tot)}</div><div style={{fontSize:11,color:B.muted}}>{c.md!==null?`${c.md} días media`:"Sin datos"}</div></div>
+        <div><div style={{fontWeight:600,fontSize:15,fontFamily:B.tS}}>{c.nombre}</div>
+          <div style={{fontSize:12,color:B.muted,marginTop:4}}>{c.fs.length} factura{c.fs.length!==1?"s":""}</div>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontWeight:700,fontFamily:B.tM}}>{fmt(c.totBase)}</div>
+          <div style={{fontSize:11,color:B.red,fontWeight:600}}>IRPF: {fmt(c.totIrpf)}</div>
+          <div style={{fontSize:11,color:B.green,fontWeight:600}}>Neto: {fmt(c.benefNeto)}</div>
+        </div>
       </div>
-      {c.v>0&&<div style={{marginTop:10,background:B.red+"12",color:B.red,padding:"8px 14px",borderRadius:6,fontSize:13,fontWeight:600}}>⚠️ {c.v} factura{c.v>1?"s":""} vencida{c.v>1?"s":""}</div>}
+      {(c.v>0||c.p>0)&&<div style={{marginTop:10,display:"flex",gap:8}}>
+        {c.v>0&&<span style={{background:B.red+"12",color:B.red,padding:"4px 10px",borderRadius:6,fontSize:12,fontWeight:600}}>{c.v} vencida{c.v>1?"s":""}</span>}
+        {c.p>0&&<span style={{background:B.amber+"12",color:B.amber,padding:"4px 10px",borderRadius:6,fontSize:12,fontWeight:600}}>{c.p} pendiente{c.p>1?"s":""}</span>}
+      </div>}
       {sel===c.id&&c.fs.length>0&&(<div style={{marginTop:16,display:"flex",flexDirection:"column",gap:8}}><Lbl>Facturas</Lbl>
-        {c.fs.map(f=>(<div key={f.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"rgba(0,0,0,0.03)",padding:"10px 14px",borderRadius:8,fontSize:13,gap:8}}>
-          <span style={{fontWeight:700,fontFamily:B.tM,fontSize:12}}>{f.fields["Nº Factura"]||"-"}</span>
-          <span style={{color:B.muted}}>{f.fields["Fecha"]||"-"}</span>
-          <span style={{fontWeight:600}}>{fmt(f.fields["Base Imponible"])}</span>
+        {c.fs.map(f=>{const irpfF=f.fields["IRPF (€)"]||0;
+          return(<div key={f.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"rgba(0,0,0,0.03)",padding:"12px 14px",borderRadius:8,fontSize:13,gap:6,flexWrap:"wrap"}}>
+          <span style={{fontWeight:700,fontFamily:B.tM,fontSize:12,minWidth:90}}>{f.fields["Nº Factura"]||"-"}</span>
+          <span style={{color:B.muted,minWidth:80}}>{f.fields["Fecha"]||"-"}</span>
+          <span style={{fontWeight:600,minWidth:70}}>{fmt(f.fields["Base Imponible"])}</span>
+          <span style={{color:B.red,fontSize:11,fontWeight:600,minWidth:60}}>IRPF {fmt(irpfF)}</span>
           <Sem estado={f.fields["Estado"]||"Pendiente"}/>
-          <button onClick={e=>{e.stopPropagation();if(confirm("¿Borrar esta factura?"))delFactura(f.id)}} disabled={del===f.id} style={{...B.btnDel,opacity:del===f.id?0.5:1}}>BORRAR</button>
-        </div>))}
+          <select value={f.fields["Estado"]||"Pendiente"} onClick={e=>e.stopPropagation()} onChange={e=>{e.stopPropagation();cambiarEstado(f.id,e.target.value)}}
+            disabled={updId===f.id}
+            style={{padding:"4px 8px",borderRadius:4,border:`1px solid ${B.border}`,fontSize:11,fontFamily:B.tM,cursor:"pointer",background:updId===f.id?"#eee":"#fff"}}>
+            <option value="Pendiente">Pendiente</option><option value="Cobrada">Cobrada</option><option value="Vencida">Vencida</option>
+          </select>
+          <button onClick={e=>{e.stopPropagation();if(confirm("¿Borrar esta factura?"))delFactura(f.id)}} disabled={del===f.id} style={{...B.btnDel,opacity:del===f.id?0.5:1}}>✕</button>
+        </div>)})}
       </div>)}
     </div>))}
   </div>);
@@ -532,7 +560,7 @@ function OCRView({onRefresh}){
 // ============================================================
 // APP
 // ============================================================
-const MENU=[{id:"dashboard",label:"DASHBOARD"},{id:"clientes",label:"CLIENTES"},{id:"simulador",label:"SIMULADOR"},{id:"gastos",label:"GASTOS"},{id:"morosidad",label:"MOROSIDAD"},{id:"autonomo",label:"CUOTA AUTÓNOMOS"},{id:"ocr",label:"AÑADIR FACTURA"}];
+const MENU=[{id:"dashboard",label:"DASHBOARD"},{id:"clientes",label:"CLIENTES"},{id:"simulador",label:"SIMULADOR"},{id:"gastos",label:"GASTOS"},{id:"autonomo",label:"CUOTA AUTÓNOMOS"},{id:"ocr",label:"AÑADIR FACTURA"}];
 
 export default function App(){
   const [auth,setAuth]=useState(()=>{try{return localStorage.getItem("ga_auth")==="1"}catch{return false}});
@@ -554,7 +582,6 @@ export default function App(){
     case "clientes":return <Clientes clientes={clientes} ingresos={ingresos} onRefresh={load}/>;
     case "simulador":return <Simulador/>;
     case "gastos":return <GastosView gastos={gastos} onRefresh={load} filtro={filtro} setFiltro={setFiltro}/>;
-    case "morosidad":return <Morosidad clientes={clientes} ingresos={ingresos}/>;
     case "autonomo":return <CuotaAut ingresos={ingresos} gastos={gastos} tramos={tramos}/>;
     case "ocr":return <OCRView onRefresh={load}/>;
     default:return <Dashboard ingresos={ingresos} gastos={gastos} tramos={tramos} salObj={salObj} setSalObj={setSalObj} filtro={filtro} setFiltro={setFiltro}/>;
