@@ -387,18 +387,58 @@ async function pdf2img(buf){const lib=await loadPdf();const pdf=await lib.getDoc
 async function ocr(b64){const r=await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${VK}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({requests:[{image:{content:b64},features:[{type:"TEXT_DETECTION",maxResults:1}]}]})});const d=await r.json();if(d.error)throw new Error(d.error.message);return d.responses?.[0]?.fullTextAnnotation?.text||""}
 
 function parseF(text){const t=text.replace(/\r/g,"");
+  const lines=t.split("\n").map(l=>l.trim()).filter(l=>l);
   const num=(t.match(/(?:factura|fra)[:\s]*\n?\s*([A-Z0-9][\w\-\/]*\d+)/i)||t.match(/(?:nº|n°)[:\s]*\s*([A-Z0-9][\w\-\/]+)/i)||[])[1]||"";
   const fM=t.match(/(?:fecha(?:\s+de\s+factura)?)[:\s]*\n?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i)||t.match(/(\d{2}[\/-]\d{2}[\/-]\d{4})/);
   const fecha=fM?fM[1]:"";const cifM=t.match(/(\d{8}[A-Z])/);const cif=cifM?cifM[0]:"";
-  const fa=(ps)=>{for(const p of ps){const m=t.match(p);if(m){const v=m[1].replace(/\s/g,"").replace(/\./g,"").replace(",",".");const n=parseFloat(v);if(!isNaN(n)&&n>0)return n}}return 0};
-  const base=fa([/Subtotal\s+([0-9.,]+)\s*€/i,/Subtotal\s+([0-9.,]+)/i,/base\s*imponible[:\s]*([0-9.,]+)/i,/Importe\s+([0-9.,]+)\s*€/i]);
-  const iva=fa([/IVA\s+\d+%?\s+([0-9.,]+)\s*€/i,/IVA\s+\d+%\s+([0-9.,]+)/i,/IVA[:\s]+([0-9.,]+)/i]);
-  const irpf=fa([/IRPF\s+-?\d+%?\s+-?([0-9.,]+)\s*€/i,/IRPF\s+-?\d+%?\s+-?([0-9.,]+)/i,/[Rr]etenci[oó]n[:\s]*-?\s*([0-9.,]+)/i]);
-  const total=fa([/Total\s+([0-9.,]+)\s*€/i,/Total[:\s]+([0-9.,]+)/i]);
+
+  // Parse the Subtotal/IVA/IRPF/Total block specifically
+  // Format in OCR: Subtotal \n IVA 21% \n 120,00 € \n 25,20 € \n IRPF -15% \n -18,00 € \n Total \n 127,20 €
+  let base=0, iva=0, irpf=0, total=0;
+  
+  // Find all euro amounts in order
+  const amounts=[];
+  for(let i=0;i<lines.length;i++){
+    const m=lines[i].match(/^-?([0-9]+[.,]\d{2})\s*€$/);
+    if(m){
+      const v=m[1].replace(/\./g,"").replace(",",".");
+      amounts.push({idx:i, val:parseFloat(v), line:lines[i]});
+    }
+  }
+
+  // Find keyword positions
+  const findLine=(kw)=>{for(let i=0;i<lines.length;i++){if(lines[i].toLowerCase().includes(kw.toLowerCase()))return i}return -1};
+  const subIdx=findLine("Subtotal");
+  const ivaIdx=findLine("IVA");
+  const irpfIdx=findLine("IRPF");
+  const totalIdx=Math.max(findLine("Total"),0);
+
+  // Assign amounts based on position relative to keywords
+  // The OCR layout is: Subtotal then IVA% then baseAmount then ivaAmount then IRPF% then irpfAmount then Total then totalAmount
+  if(subIdx>=0){
+    // Find the first € amount AFTER subtotal keyword
+    const subAmounts=amounts.filter(a=>a.idx>subIdx);
+    if(subAmounts.length>=1) base=subAmounts[0].val;
+    if(subAmounts.length>=2) iva=subAmounts[1].val;
+    if(subAmounts.length>=3) irpf=subAmounts[2].val;
+    if(subAmounts.length>=4) total=subAmounts[3].val;
+  } else {
+    // Fallback: try same-line matching
+    for(let i=0;i<lines.length;i++){
+      const l=lines[i];
+      if(/subtotal|base\s*imponible/i.test(l)){const m=l.match(/([0-9.,]+)\s*€/);if(m)base=parseFloat(m[1].replace(/\./g,"").replace(",","."))}
+      if(/^iva/i.test(l)){const m=l.match(/([0-9.,]+)\s*€/);if(m)iva=parseFloat(m[1].replace(/\./g,"").replace(",","."))}
+      if(/irpf/i.test(l)){const m=l.match(/([0-9.,]+)\s*€/);if(m)irpf=parseFloat(m[1].replace(/\./g,"").replace(",","."))}
+      if(/^total$/i.test(l.replace(/\s/g,""))){if(i+1<lines.length){const m=lines[i+1].match(/([0-9.,]+)\s*€/);if(m)total=parseFloat(m[1].replace(/\./g,"").replace(",","."))}}
+    }
+  }
+
   const clM=t.match(/Para\s*\n\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]+)/);
   let cliente=clM?clM[1].trim().split("\n")[0].trim():"";if(cliente.length>60)cliente=cliente.substring(0,60);
-  const dsM=t.match(/(?:Descripci[oó]n|CONTENIDO|ESTRATEGIA)[:\s+]*([^\n]+)/i);
-  return{numero:num,fecha,cliente,cif,base,iva,irpf,total,desc:dsM?dsM[1].trim():""}}
+  const dsM=t.match(/(?:ESTRATEGIA|CONTENIDO|Descripci[oó]n)[:\s+]*([^\n]*)/i);
+  let desc=dsM?dsM[1].trim():"";
+  if(!desc){const di=findLine("ESTRATEGIA");if(di>=0)desc=lines[di]}
+  return{numero:num,fecha,cliente,cif,base,iva,irpf,total,desc}}
 
 function convD(d){if(!d)return"";const p=d.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/);if(!p)return d;let[,dy,mo,yr]=p;if(yr.length===2)yr="20"+yr;return`${yr}-${mo.padStart(2,"0")}-${dy.padStart(2,"0")}`}
 
