@@ -1,12 +1,67 @@
 // src/components/Dashboard.jsx
-// Panel principal: KPIs, Hucha de Hacienda, gráfica, flujo de caja.
+// Panel principal completo: KPIs, Hucha, gráfica, próximo IVA, cuota, alertas.
 
 import { useState } from "react";
-import { B, fmt, MESES, applyF } from "../utils.js";
+import { B, fmt, MESES, applyF, getTrimestre } from "../utils.js";
 import { useResponsive } from "../hooks/useResponsive.js";
 import { Card, Lbl, Big, Sub, PBar, FilterBar, SectionHeader } from "./UI.jsx";
 
-export default function Dashboard({ ingresos, gastos, salObj, setSalObj, filtro, setFiltro }) {
+// ============================================================
+// PRÓXIMO VENCIMIENTO DE IVA
+// ============================================================
+function nextIVAClosingDate() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const limites = [
+    { tri: "Q1", date: new Date(year, 3, 20) },
+    { tri: "Q2", date: new Date(year, 6, 20) },
+    { tri: "Q3", date: new Date(year, 9, 20) },
+    { tri: "Q4", date: new Date(year + 1, 0, 30) }
+  ];
+  for (const l of limites) {
+    if (l.date >= now) return l;
+  }
+  return limites[0];
+}
+
+// ============================================================
+// CÁLCULO DE TRAMO
+// ============================================================
+function calcularTramo(ingresos, gastos, tramos, cuotaActual) {
+  if (!tramos || tramos.length === 0) return null;
+
+  const tI = ingresos.reduce((s, r) => s + (r.fields["Base Imponible"] || 0), 0);
+  const tG = gastos.reduce((s, r) => s + (r.fields["Base Imponible"] || 0), 0);
+  const ms = Math.max(new Date().getMonth() + 1, 1);
+  const rn = ((tI - tG - (cuotaActual * ms)) * 0.93) / ms;
+
+  const td = tramos.map(r => ({
+    tramo: r.fields["Tramo"] || 0,
+    min: r.fields["Rend. Neto Mín"] || r.fields["Rend Neto Min"] || 0,
+    max: r.fields["Rend. Neto Máx"] || r.fields["Rend Neto Max"] || 0,
+    cuota: r.fields["Cuota Mínima"] || r.fields["Cuota Minima"] || 0
+  })).sort((a, b) => a.tramo - b.tramo);
+
+  const tr = rn <= 0
+    ? td[0]
+    : (td.find(t => rn >= t.min && rn < t.max) || td[0]);
+
+  return {
+    rn,
+    tramo: tr.tramo,
+    cuotaCorrecta: tr.cuota,
+    diff: tr.cuota - cuotaActual
+  };
+}
+
+// ============================================================
+// COMPONENTE
+// ============================================================
+export default function Dashboard({
+  ingresos, gastos, tramos, alertas,
+  salObj, setSalObj,
+  filtro, setFiltro
+}) {
   const { columnsForGrid, isMobile, isPhoneOrSmallTablet } = useResponsive();
 
   const fi = applyF(ingresos, filtro);
@@ -14,18 +69,17 @@ export default function Dashboard({ ingresos, gastos, salObj, setSalObj, filtro,
 
   const tFact = fi.reduce((s, r) => s + (r.fields["Base Imponible"] || 0), 0);
   const tCob = fi.filter(r => r.fields["Estado"] === "Cobrada").reduce((s, r) => s + (r.fields["Base Imponible"] || 0), 0);
+  const tPend = fi.filter(r => ["Pendiente", "Vencida"].includes(r.fields["Estado"]))
+    .reduce((s, r) => s + (r.fields["Base Imponible"] || 0), 0);
   const ivaR = fi.reduce((s, r) => s + (r.fields["IVA (€)"] || 0), 0);
   const ivaS = fg.reduce((s, r) => s + (r.fields["IVA Soportado (€)"] || 0), 0);
-  // IRPF retenido = lo que retienes a proveedores (en gastos), NO el de tus facturas
   const irpfRet = fg.reduce((s, r) => s + (r.fields["IRPF Retenido (€)"] || 0), 0);
   const tGast = fg.reduce((s, r) => s + (r.fields["Base Imponible"] || 0), 0);
-  // IRPF que te retienen tus clientes (reduce tu beneficio real)
   const irpfClientes = fi.reduce((s, r) => s + (r.fields["IRPF (€)"] || 0), 0);
-  // Beneficio neto REAL = Facturado - IRPF retenido por clientes - Gastos
   const benef = tFact - irpfClientes - tGast;
-  // HUCHA: IVA Rep - IVA Sop + IRPF retenido a proveedores
   const hucha = ivaR - ivaS + irpfRet;
   const venc = fi.filter(r => r.fields["Estado"] === "Vencida").length;
+  const eficiencia = tFact > 0 ? Math.round((tCob / tFact) * 100) : 0;
 
   const mT = Math.max(
     new Set(fi.map(r => r.fields["Fecha"] ? new Date(r.fields["Fecha"]).getMonth() : -1).filter(m => m >= 0)).size,
@@ -33,10 +87,27 @@ export default function Dashboard({ ingresos, gastos, salObj, setSalObj, filtro,
   );
   const bMes = benef / mT;
 
+  // Próximo cierre IVA
+  const proxIVA = nextIVAClosingDate();
+  const diasIVA = Math.max(0, Math.floor((proxIVA.date - new Date()) / 86400000));
+  const ivaTrim = ingresos.filter(r => r.fields["Fecha"] && getTrimestre(r.fields["Fecha"]) === proxIVA.tri)
+    .reduce((s, r) => s + (r.fields["IVA (€)"] || 0), 0)
+    - gastos.filter(r => r.fields["Fecha"] && getTrimestre(r.fields["Fecha"]) === proxIVA.tri)
+    .reduce((s, r) => s + (r.fields["IVA Soportado (€)"] || 0), 0);
+
+  // Cuota autónomos
+  const cuotaActual = (() => {
+    try { return Number(localStorage.getItem("ga_cuota")) || 294; } catch { return 294; }
+  })();
+  const tramoInfo = calcularTramo(ingresos, gastos, tramos, cuotaActual);
+
+  // Alertas activas
+  const alertasActivas = (alertas || []).filter(a => a.fields["Mostrada"] !== true).length;
+
   const [editS, setEditS] = useState(false);
   const [tmpS, setTmpS] = useState(salObj);
 
-  // Rango de meses a mostrar en la gráfica
+  // Datos gráfica
   const mRange = filtro.tri
     ? { Q1: [0, 1, 2], Q2: [3, 4, 5], Q3: [6, 7, 8], Q4: [9, 10, 11] }[filtro.tri]
     : filtro.mes !== ""
@@ -62,7 +133,7 @@ export default function Dashboard({ ingresos, gastos, salObj, setSalObj, filtro,
       <SectionHeader title="Dashboard" />
       <FilterBar filtro={filtro} setFiltro={setFiltro} />
 
-      {/* KPIs principales: grid responsive */}
+      {/* FILA 1: KPIs principales */}
       <div style={{
         display: "grid",
         gridTemplateColumns: `repeat(${columnsForGrid}, 1fr)`,
@@ -74,19 +145,19 @@ export default function Dashboard({ ingresos, gastos, salObj, setSalObj, filtro,
           <Sub>Base imponible</Sub>
         </Card>
         <Card>
-          <Lbl>Cobrado Real</Lbl>
-          <Big color={B.green}>{fmt(tCob)}</Big>
-          <Sub>En tu cuenta</Sub>
+          <Lbl>Total Gastos</Lbl>
+          <Big color={B.red}>{fmt(tGast)}</Big>
+          <Sub>Del período</Sub>
         </Card>
         <Card>
           <Lbl>Beneficio Neto</Lbl>
           <Big color={benef > 0 ? B.green : B.red}>{fmt(benef)}</Big>
-          <Sub>{fmt(bMes)}/mes (IRPF descontado)</Sub>
+          <Sub>{fmt(bMes)}/mes</Sub>
         </Card>
         <Card>
-          <Lbl>Facturas Vencidas</Lbl>
-          <Big color={B.red}>{venc}</Big>
-          <Sub>Sin cobrar</Sub>
+          <Lbl>Pendiente Cobro</Lbl>
+          <Big color={B.amber}>{fmt(tPend)}</Big>
+          <Sub>{venc} vencida{venc !== 1 ? "s" : ""}</Sub>
         </Card>
       </div>
 
@@ -136,49 +207,154 @@ export default function Dashboard({ ingresos, gastos, salObj, setSalObj, filtro,
         </div>
       </div>
 
-      {/* Objetivo salario + IVA trimestral: 2 cols en escritorio, 1 en móvil */}
+      {/* FILA 2: Próximo IVA + Cuota */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: isPhoneOrSmallTablet ? "1fr" : "1fr 1fr",
+        gap: 14
+      }}>
+        <Card style={{ borderLeft: `4px solid ${diasIVA <= 7 ? B.red : diasIVA <= 15 ? B.amber : B.purple}` }}>
+          <Lbl>Próximo cierre IVA ({proxIVA.tri})</Lbl>
+          <div style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: 8,
+            marginTop: 6,
+            flexWrap: "wrap"
+          }}>
+            <span style={{
+              fontSize: 30,
+              fontWeight: 700,
+              color: diasIVA <= 7 ? B.red : diasIVA <= 15 ? B.amber : B.text,
+              fontFamily: B.tM
+            }}>
+              {diasIVA}
+            </span>
+            <span style={{ fontSize: 13, color: B.muted }}>
+              día{diasIVA !== 1 ? "s" : ""} restante{diasIVA !== 1 ? "s" : ""}
+            </span>
+          </div>
+          <div style={{ marginTop: 8, fontSize: 12, color: B.muted, fontFamily: B.tS }}>
+            Modelo 303 · A ingresar: <strong style={{ color: B.text }}>{fmt(ivaTrim)}</strong>
+          </div>
+          <div style={{ marginTop: 4, fontSize: 11, color: B.muted, fontFamily: B.tM }}>
+            {proxIVA.date.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}
+          </div>
+        </Card>
+
+        {tramoInfo && (
+          <Card style={{ borderLeft: `4px solid ${tramoInfo.diff === 0 ? B.green : Math.abs(tramoInfo.diff) > 50 ? B.red : B.amber}` }}>
+            <Lbl>Cuota Autónomos</Lbl>
+            <div style={{
+              display: "flex",
+              alignItems: "baseline",
+              gap: 8,
+              marginTop: 6,
+              flexWrap: "wrap"
+            }}>
+              <span style={{ fontSize: 30, fontWeight: 700, color: B.text, fontFamily: B.tM }}>
+                Tramo {tramoInfo.tramo}
+              </span>
+            </div>
+            <div style={{ marginTop: 8, fontSize: 12, color: B.muted, fontFamily: B.tS }}>
+              Pagas: <strong>{fmt(cuotaActual)}</strong> · Correcta: <strong style={{ color: B.text }}>{fmt(tramoInfo.cuotaCorrecta)}</strong>
+            </div>
+            {tramoInfo.diff !== 0 && (
+              <div style={{
+                marginTop: 4,
+                fontSize: 12,
+                color: tramoInfo.diff > 0 ? B.red : B.green,
+                fontWeight: 600
+              }}>
+                {tramoInfo.diff > 0
+                  ? `⚠️ Pagas ${fmt(Math.abs(tramoInfo.diff))}/mes de menos`
+                  : `✅ Ahorro posible: ${fmt(Math.abs(tramoInfo.diff))}/mes`}
+              </div>
+            )}
+          </Card>
+        )}
+      </div>
+
+      {/* FILA 3: Eficiencia + Alertas */}
       <div style={{
         display: "grid",
         gridTemplateColumns: isPhoneOrSmallTablet ? "1fr" : "1fr 1fr",
         gap: 14
       }}>
         <Card>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-            <Lbl>Objetivo Salario</Lbl>
-            <button
-              onClick={() => {
-                if (editS) {
-                  setSalObj(Number(tmpS));
-                  try { localStorage.setItem("ga_salario", tmpS); } catch {}
-                }
-                setEditS(!editS);
-              }}
-              style={B.btnSm}
-            >
-              {editS ? "GUARDAR" : "EDITAR"}
-            </button>
+          <Lbl>Eficiencia de Cobro</Lbl>
+          <div style={{ marginTop: 10 }}>
+            <PBar
+              value={tCob}
+              max={tFact || 1}
+              label={`${eficiencia}% cobrado`}
+              color={eficiencia >= 80 ? B.green : eficiencia >= 50 ? B.amber : B.red}
+            />
           </div>
-          {editS && (
-            <div style={{ marginBottom: 12 }}>
-              <input
-                type="number"
-                value={tmpS}
-                onChange={e => setTmpS(e.target.value)}
-                style={{ ...B.inp, fontSize: 18, fontWeight: 700, fontFamily: B.tM, textAlign: "center" }}
-              />
-            </div>
-          )}
-          <PBar value={bMes} max={salObj} label="Media mensual" color={bMes >= salObj ? B.green : B.amber} />
+          <div style={{ marginTop: 10, fontSize: 12, color: B.muted, fontFamily: B.tS }}>
+            Cobrado: <strong style={{ color: B.green }}>{fmt(tCob)}</strong> · Pendiente: <strong style={{ color: B.amber }}>{fmt(tFact - tCob)}</strong>
+          </div>
         </Card>
 
-        <Card>
-          <Lbl>IVA Trimestral</Lbl>
-          <Big color={B.purple}>{fmt(ivaR - ivaS)}</Big>
-          <Sub>Modelo 303</Sub>
+        <Card style={{ borderLeft: `4px solid ${alertasActivas > 0 ? B.amber : B.green}` }}>
+          <Lbl>Alertas Activas</Lbl>
+          <div style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: 8,
+            marginTop: 6
+          }}>
+            <span style={{
+              fontSize: 30,
+              fontWeight: 700,
+              color: alertasActivas > 0 ? B.amber : B.green,
+              fontFamily: B.tM
+            }}>
+              {alertasActivas}
+            </span>
+            <span style={{ fontSize: 13, color: B.muted }}>
+              sin atender
+            </span>
+          </div>
+          <div style={{ marginTop: 8, fontSize: 12, color: B.muted, fontFamily: B.tS }}>
+            {alertasActivas > 0
+              ? "Revisa la sección Alertas para verlas"
+              : "Todo bajo control 🎉"}
+          </div>
         </Card>
       </div>
 
-      {/* Gráfica Ingresos vs Gastos */}
+      {/* OBJETIVO SALARIO */}
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <Lbl>Objetivo Salario</Lbl>
+          <button
+            onClick={() => {
+              if (editS) {
+                setSalObj(Number(tmpS));
+                try { localStorage.setItem("ga_salario", tmpS); } catch {}
+              }
+              setEditS(!editS);
+            }}
+            style={B.btnSm}
+          >
+            {editS ? "GUARDAR" : "EDITAR"}
+          </button>
+        </div>
+        {editS && (
+          <div style={{ marginBottom: 12 }}>
+            <input
+              type="number"
+              value={tmpS}
+              onChange={e => setTmpS(e.target.value)}
+              style={{ ...B.inp, fontSize: 18, fontWeight: 700, fontFamily: B.tM, textAlign: "center" }}
+            />
+          </div>
+        )}
+        <PBar value={bMes} max={salObj} label="Beneficio neto medio mensual" color={bMes >= salObj ? B.green : B.amber} />
+      </Card>
+
+      {/* GRÁFICA INGRESOS VS GASTOS */}
       {mData.length > 0 && (
         <Card>
           <Lbl>Ingresos vs Gastos</Lbl>
@@ -225,33 +401,6 @@ export default function Dashboard({ ingresos, gastos, salObj, setSalObj, filtro,
           </div>
         </Card>
       )}
-
-      {/* Flujo de Caja */}
-      <Card>
-        <Lbl>Flujo de Caja</Lbl>
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 14,
-          marginTop: 14
-        }}>
-          <div style={{ textAlign: "center", padding: 18, background: "rgba(0,0,0,0.03)", borderRadius: 8 }}>
-            <div style={{ fontSize: 11, color: B.muted, fontFamily: B.tM, textTransform: "uppercase" }}>Facturado</div>
-            <div style={{ fontSize: isMobile ? 20 : 26, fontWeight: 700, color: B.purple, fontFamily: B.tM, marginTop: 4 }}>
-              {fmt(tFact)}
-            </div>
-          </div>
-          <div style={{ textAlign: "center", padding: 18, background: "rgba(0,0,0,0.03)", borderRadius: 8 }}>
-            <div style={{ fontSize: 11, color: B.muted, fontFamily: B.tM, textTransform: "uppercase" }}>Cobrado</div>
-            <div style={{ fontSize: isMobile ? 20 : 26, fontWeight: 700, color: B.green, fontFamily: B.tM, marginTop: 4 }}>
-              {fmt(tCob)}
-            </div>
-          </div>
-        </div>
-        <div style={{ marginTop: 12, textAlign: "center", fontSize: 13, color: B.muted }}>
-          Pendiente: <strong style={{ color: B.amber }}>{fmt(tFact - tCob)}</strong>
-        </div>
-      </Card>
     </div>
   );
 }
