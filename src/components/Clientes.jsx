@@ -1,16 +1,26 @@
 // src/components/Clientes.jsx
-// Gestión de clientes con notas, estado activo/inactivo y facturas asociadas.
-// Versión simplificada: el campo Estatus de Airtable siempre tiene un valor
-// explícito ("Activo" o "Inactivo"), no necesitamos overrides ni helpers raros.
+// Gestión completa de clientes: nombre, CIF, email, estado comercial, estatus,
+// notas, facturas asociadas, y borrado seguro.
 
 import { useState } from "react";
 import { B, fmt, hoy } from "../utils.js";
 import { useResponsive } from "../hooks/useResponsive.js";
 import { createRecord, updateRecord, deleteRecord } from "../api.js";
-import { Card, Lbl, Sem, SectionHeader, TxtArea } from "./UI.jsx";
+import { Card, Lbl, Sem, SectionHeader, TxtArea, Inp } from "./UI.jsx";
+
+// ============================================================
+// ESTADO COMERCIAL: colores y labels
+// ============================================================
+const ESTADOS_COMERCIAL = ["Al día", "Pendiente", "Moroso"];
+function colorEstado(estado) {
+  if (estado === "Al día") return B.green;
+  if (estado === "Pendiente") return B.amber;
+  if (estado === "Moroso") return B.red;
+  return B.muted;
+}
 
 export default function Clientes({ clientes, ingresos, onRefresh }) {
-  const { isMobile } = useResponsive();
+  const { isMobile, formColumns } = useResponsive();
 
   const [sel, setSel] = useState(null);
   const [del, setDel] = useState(null);
@@ -23,12 +33,18 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
   const [showInactive, setShowInactive] = useState(false);
   const [search, setSearch] = useState("");
 
-  // Estado local para edición de notas (clientId -> texto temporal)
+  // Estado local para edición de cada campo (clientId -> valor temporal)
+  const [nombresTmp, setNombresTmp] = useState({});
+  const [nombreEditing, setNombreEditing] = useState(null);
+  const [cifTmp, setCifTmp] = useState({});
+  const [emailTmp, setEmailTmp] = useState({});
   const [notasTmp, setNotasTmp] = useState({});
-  const [notaSaving, setNotaSaving] = useState(null);
 
-  // Indicador "guardando" del cambio de Estatus
+  // Indicadores "guardando"
+  const [fieldSaving, setFieldSaving] = useState(null); // "nombre-X", "cif-X", etc.
   const [estatusSaving, setEstatusSaving] = useState(null);
+  const [estadoSaving, setEstadoSaving] = useState(null);
+  const [deletingClient, setDeletingClient] = useState(null);
 
   // ============================================================
   // ACCIONES
@@ -37,7 +53,11 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
     if (!newName.trim()) return;
     setSaving(true);
     try {
-      await createRecord("Clientes", { "Nombre": newName.trim(), "Estatus": "Activo" });
+      await createRecord("Clientes", {
+        "Nombre": newName.trim(),
+        "Estatus": "Activo",
+        "Estado": "Al día"
+      });
       setNewName("");
       setShowAdd(false);
       await onRefresh();
@@ -71,22 +91,46 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
     setUpdId(null);
   };
 
-  const guardarNota = async (clienteId) => {
-    const texto = notasTmp[clienteId];
-    if (texto === undefined) return;
-    setNotaSaving(clienteId);
+  const guardarCampo = async (clienteId, fieldName, valor, tmpSetter) => {
+    const key = `${fieldName}-${clienteId}`;
+    setFieldSaving(key);
     try {
-      await updateRecord("Clientes", clienteId, { "Notas": texto });
-      setNotasTmp(prev => {
+      await updateRecord("Clientes", clienteId, { [fieldName]: valor });
+      tmpSetter(prev => {
         const next = { ...prev };
         delete next[clienteId];
         return next;
       });
       await onRefresh();
     } catch (e) {
-      alert("Error guardando notas: " + e.message);
+      alert(`Error guardando ${fieldName}: ${e.message}`);
     }
-    setNotaSaving(null);
+    setFieldSaving(null);
+  };
+
+  const guardarNombre = async (clienteId) => {
+    const texto = nombresTmp[clienteId];
+    if (texto === undefined || !texto.trim()) return;
+    await guardarCampo(clienteId, "Nombre", texto.trim(), setNombresTmp);
+    setNombreEditing(null);
+  };
+
+  const guardarCif = (clienteId) => {
+    const texto = cifTmp[clienteId];
+    if (texto === undefined) return;
+    return guardarCampo(clienteId, "CIF/NIF", texto.trim(), setCifTmp);
+  };
+
+  const guardarEmail = (clienteId) => {
+    const texto = emailTmp[clienteId];
+    if (texto === undefined) return;
+    return guardarCampo(clienteId, "Email", texto.trim(), setEmailTmp);
+  };
+
+  const guardarNota = (clienteId) => {
+    const texto = notasTmp[clienteId];
+    if (texto === undefined) return;
+    return guardarCampo(clienteId, "Notas", texto, setNotasTmp);
   };
 
   const toggleEstatus = async (clienteId, estatusActual) => {
@@ -101,15 +145,46 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
     setEstatusSaving(null);
   };
 
+  const cambiarEstado = async (clienteId, nuevoEstado) => {
+    setEstadoSaving(clienteId);
+    try {
+      await updateRecord("Clientes", clienteId, { "Estado": nuevoEstado });
+      await onRefresh();
+    } catch (e) {
+      alert("Error cambiando estado: " + e.message);
+    }
+    setEstadoSaving(null);
+  };
+
+  const borrarCliente = async (clienteId, nombre, tieneFacturas) => {
+    if (tieneFacturas) {
+      alert(`No se puede borrar "${nombre}" porque tiene facturas asociadas. Borra primero las facturas o cambia el cliente a Inactivo.`);
+      return;
+    }
+    if (!confirm(`¿Seguro que quieres borrar el cliente "${nombre}"? Esta acción no se puede deshacer.`)) return;
+
+    setDeletingClient(clienteId);
+    try {
+      await deleteRecord("Clientes", clienteId);
+      if (sel === clienteId) setSel(null);
+      await onRefresh();
+    } catch (e) {
+      alert("Error al borrar cliente: " + e.message);
+    }
+    setDeletingClient(null);
+  };
+
   // ============================================================
   // PROCESAR DATOS DE CLIENTES
   // ============================================================
   const cd = clientes
     .map(c => {
-      const n = c.fields["Nombre"] || "Sin nombre";
-      // Si el campo no está, asumimos Activo (cliente legado/nuevo recién creado)
+      const nombre = c.fields["Nombre"] || "Sin nombre";
       const estatus = c.fields["Estatus"] || "Activo";
       const activo = estatus === "Activo";
+      const estado = c.fields["Estado"] || "Al día";
+      const cif = c.fields["CIF/NIF"] || "";
+      const email = c.fields["Email"] || "";
       const notas = c.fields["Notas"] || "";
 
       const fIds = c.fields["Ingresos"] || [];
@@ -120,24 +195,29 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
       const p = fs.filter(f => f.fields["Estado"] === "Pendiente").length;
       const v = fs.filter(f => f.fields["Estado"] === "Vencida").length;
 
+      // Color del borde izquierdo: prioriza estado comercial si no está Al día
+      let bc;
+      if (!activo) bc = B.muted;
+      else if (estado === "Moroso") bc = B.red;
+      else if (estado === "Pendiente" || v > 0) bc = B.amber;
+      else bc = B.green;
+
       return {
         id: c.id,
-        nombre: n,
-        estatus,
-        activo,
-        notas,
-        fs,
-        totBase,
-        totIrpf,
-        benefNeto,
-        p,
-        v,
-        bc: !activo ? B.muted : v > 0 ? B.red : p > 0 ? B.amber : B.green
+        nombre, estatus, activo, estado, cif, email, notas,
+        fs, totBase, totIrpf, benefNeto, p, v, bc
       };
     })
     .filter(c => {
       if (!showInactive && !c.activo) return false;
-      if (search && !c.nombre.toLowerCase().includes(search.toLowerCase())) return false;
+      if (search) {
+        const s = search.toLowerCase();
+        if (!c.nombre.toLowerCase().includes(s) &&
+            !c.cif.toLowerCase().includes(s) &&
+            !c.email.toLowerCase().includes(s)) {
+          return false;
+        }
+      }
       return true;
     });
 
@@ -159,20 +239,15 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
       />
 
       {/* Barra de filtros */}
-      <div style={{
-        display: "flex",
-        gap: 10,
-        flexWrap: "wrap",
-        alignItems: "center"
-      }}>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
         <input
           type="text"
-          placeholder="Buscar por nombre..."
+          placeholder="Buscar por nombre, CIF o email..."
           value={search}
           onChange={e => setSearch(e.target.value)}
           style={{
             ...B.inp,
-            maxWidth: isMobile ? "100%" : 280,
+            maxWidth: isMobile ? "100%" : 320,
             padding: "10px 14px",
             fontSize: 13
           }}
@@ -223,6 +298,9 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
               {saving ? "..." : "GUARDAR"}
             </button>
           </div>
+          <p style={{ fontSize: 12, color: B.muted, marginTop: 10, marginBottom: 0 }}>
+            Puedes añadir el CIF, email y más datos después al desplegar el cliente.
+          </p>
         </Card>
       )}
 
@@ -240,7 +318,16 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
       {/* Tarjetas de clientes */}
       {cd.map(c => {
         const isOpen = sel === c.id;
-        const notaActual = notasTmp[c.id] !== undefined ? notasTmp[c.id] : c.notas;
+        const isEditingName = nombreEditing === c.id;
+        const nombreValor = nombresTmp[c.id] !== undefined ? nombresTmp[c.id] : c.nombre;
+
+        const cifValor = cifTmp[c.id] !== undefined ? cifTmp[c.id] : c.cif;
+        const cifCambiado = cifTmp[c.id] !== undefined && cifTmp[c.id] !== c.cif;
+
+        const emailValor = emailTmp[c.id] !== undefined ? emailTmp[c.id] : c.email;
+        const emailCambiado = emailTmp[c.id] !== undefined && emailTmp[c.id] !== c.email;
+
+        const notaValor = notasTmp[c.id] !== undefined ? notasTmp[c.id] : c.notas;
         const notaCambiada = notasTmp[c.id] !== undefined && notasTmp[c.id] !== c.notas;
 
         return (
@@ -257,61 +344,136 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
               transition: "opacity 0.2s ease"
             }}
           >
-            {/* Cabecera (clickable) */}
+            {/* Cabecera */}
             <div
-              onClick={() => setSel(isOpen ? null : c.id)}
+              onClick={() => !isEditingName && setSel(isOpen ? null : c.id)}
               style={{
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                cursor: "pointer",
+                cursor: isEditingName ? "default" : "pointer",
                 gap: 12,
                 flexWrap: isMobile ? "wrap" : "nowrap"
               }}
             >
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{
-                  fontWeight: 600,
-                  fontSize: 15,
-                  fontFamily: B.tS,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  flexWrap: "wrap"
-                }}>
-                  {c.nombre}
-                  {!c.activo && (
-                    <span style={{
-                      background: B.muted + "20",
-                      color: B.muted,
-                      padding: "2px 8px",
-                      borderRadius: 4,
-                      fontSize: 10,
-                      fontWeight: 700,
-                      fontFamily: B.tM,
-                      textTransform: "uppercase"
-                    }}>
-                      Inactivo
-                    </span>
-                  )}
-                </div>
+                {/* Nombre (editable cuando está desplegado) */}
+                {isEditingName ? (
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }} onClick={e => e.stopPropagation()}>
+                    <input
+                      autoFocus
+                      value={nombreValor}
+                      onChange={e => setNombresTmp(prev => ({ ...prev, [c.id]: e.target.value }))}
+                      onKeyDown={e => {
+                        if (e.key === "Enter") guardarNombre(c.id);
+                        if (e.key === "Escape") {
+                          setNombresTmp(prev => { const n = { ...prev }; delete n[c.id]; return n; });
+                          setNombreEditing(null);
+                        }
+                      }}
+                      style={{ ...B.inp, maxWidth: 280, fontSize: 15, fontWeight: 600 }}
+                    />
+                    <button
+                      onClick={() => guardarNombre(c.id)}
+                      disabled={fieldSaving === `Nombre-${c.id}`}
+                      style={B.btnSm}
+                    >
+                      {fieldSaving === `Nombre-${c.id}` ? "..." : "GUARDAR"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setNombresTmp(prev => { const n = { ...prev }; delete n[c.id]; return n; });
+                        setNombreEditing(null);
+                      }}
+                      style={{
+                        ...B.btnSm,
+                        background: "transparent",
+                        color: B.muted,
+                        border: `1px solid ${B.border}`
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{
+                    fontWeight: 600,
+                    fontSize: 15,
+                    fontFamily: B.tS,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    flexWrap: "wrap"
+                  }}>
+                    {c.nombre}
+                    {isOpen && (
+                      <button
+                        onClick={e => { e.stopPropagation(); setNombreEditing(c.id); }}
+                        title="Editar nombre"
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          cursor: "pointer",
+                          padding: 2,
+                          fontSize: 13,
+                          opacity: 0.6
+                        }}
+                      >
+                        ✏️
+                      </button>
+                    )}
+                    {/* Badge Estatus */}
+                    {!c.activo && (
+                      <span style={{
+                        background: B.muted + "20",
+                        color: B.muted,
+                        padding: "2px 8px",
+                        borderRadius: 4,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        fontFamily: B.tM,
+                        textTransform: "uppercase"
+                      }}>
+                        Inactivo
+                      </span>
+                    )}
+                    {/* Badge Estado comercial (solo si no es "Al día") */}
+                    {c.activo && c.estado !== "Al día" && (
+                      <span style={{
+                        background: colorEstado(c.estado) + "18",
+                        color: colorEstado(c.estado),
+                        padding: "2px 8px",
+                        borderRadius: 4,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        fontFamily: B.tM,
+                        textTransform: "uppercase"
+                      }}>
+                        {c.estado}
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div style={{ fontSize: 12, color: B.muted, marginTop: 4 }}>
                   {c.fs.length} factura{c.fs.length !== 1 ? "s" : ""}
+                  {c.cif && <span> · {c.cif}</span>}
                 </div>
               </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontWeight: 700, fontFamily: B.tM }}>{fmt(c.totBase)}</div>
-                <div style={{ fontSize: 11, color: B.red, fontWeight: 600 }}>
-                  IRPF: {fmt(c.totIrpf)}
+              {!isEditingName && (
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontWeight: 700, fontFamily: B.tM }}>{fmt(c.totBase)}</div>
+                  <div style={{ fontSize: 11, color: B.red, fontWeight: 600 }}>
+                    IRPF: {fmt(c.totIrpf)}
+                  </div>
+                  <div style={{ fontSize: 11, color: B.green, fontWeight: 600 }}>
+                    Neto: {fmt(c.benefNeto)}
+                  </div>
                 </div>
-                <div style={{ fontSize: 11, color: B.green, fontWeight: 600 }}>
-                  Neto: {fmt(c.benefNeto)}
-                </div>
-              </div>
+              )}
             </div>
 
-            {/* Insignias rápidas */}
-            {(c.v > 0 || c.p > 0) && (
+            {/* Insignias rápidas de facturas */}
+            {(c.v > 0 || c.p > 0) && !isEditingName && (
               <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {c.v > 0 && (
                   <span style={{
@@ -341,9 +503,9 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
             )}
 
             {/* Panel desplegable */}
-            {isOpen && (
+            {isOpen && !isEditingName && (
               <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 16 }}>
-                {/* Toggle Estatus */}
+                {/* Fila de Estatus (Activo/Inactivo) */}
                 <div style={{
                   display: "flex",
                   alignItems: "center",
@@ -352,9 +514,9 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
                   borderBottom: `1px solid ${B.border}`,
                   flexWrap: "wrap"
                 }}>
-                  <Lbl>Estatus del cliente</Lbl>
+                  <Lbl>Estatus</Lbl>
                   <button
-                    onClick={(e) => { e.stopPropagation(); toggleEstatus(c.id, c.estatus); }}
+                    onClick={e => { e.stopPropagation(); toggleEstatus(c.id, c.estatus); }}
                     disabled={estatusSaving === c.id}
                     style={{
                       ...B.btnSm,
@@ -369,11 +531,118 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
                   </button>
                 </div>
 
+                {/* Fila de Estado comercial */}
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  paddingBottom: 12,
+                  borderBottom: `1px solid ${B.border}`,
+                  flexWrap: "wrap"
+                }}>
+                  <Lbl>Estado de pagos</Lbl>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }} onClick={e => e.stopPropagation()}>
+                    {ESTADOS_COMERCIAL.map(opt => {
+                      const isActive = c.estado === opt;
+                      const col = colorEstado(opt);
+                      return (
+                        <button
+                          key={opt}
+                          onClick={() => cambiarEstado(c.id, opt)}
+                          disabled={estadoSaving === c.id}
+                          style={{
+                            ...B.btnSm,
+                            background: isActive ? col : "transparent",
+                            color: isActive ? "#fff" : col,
+                            border: `1px solid ${col}`,
+                            opacity: estadoSaving === c.id ? 0.5 : 1
+                          }}
+                        >
+                          {opt.toUpperCase()}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Campos CIF y Email en grid responsive */}
+                <div
+                  onClick={e => e.stopPropagation()}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: `repeat(${formColumns}, 1fr)`,
+                    gap: 14
+                  }}
+                >
+                  <div>
+                    <Inp
+                      label="CIF/NIF"
+                      value={cifValor}
+                      onChange={v => setCifTmp(prev => ({ ...prev, [c.id]: v }))}
+                      ph="B12345678"
+                    />
+                    {cifCambiado && (
+                      <div style={{ marginTop: 6, display: "flex", gap: 6 }}>
+                        <button
+                          onClick={() => guardarCif(c.id)}
+                          disabled={fieldSaving === `CIF/NIF-${c.id}`}
+                          style={{ ...B.btnSm, opacity: fieldSaving === `CIF/NIF-${c.id}` ? 0.5 : 1 }}
+                        >
+                          {fieldSaving === `CIF/NIF-${c.id}` ? "..." : "GUARDAR"}
+                        </button>
+                        <button
+                          onClick={() => setCifTmp(prev => { const n = { ...prev }; delete n[c.id]; return n; })}
+                          style={{
+                            ...B.btnSm,
+                            background: "transparent",
+                            color: B.muted,
+                            border: `1px solid ${B.border}`
+                          }}
+                        >
+                          DESCARTAR
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <Inp
+                      label="Email"
+                      value={emailValor}
+                      onChange={v => setEmailTmp(prev => ({ ...prev, [c.id]: v }))}
+                      type="email"
+                      ph="contacto@empresa.com"
+                    />
+                    {emailCambiado && (
+                      <div style={{ marginTop: 6, display: "flex", gap: 6 }}>
+                        <button
+                          onClick={() => guardarEmail(c.id)}
+                          disabled={fieldSaving === `Email-${c.id}`}
+                          style={{ ...B.btnSm, opacity: fieldSaving === `Email-${c.id}` ? 0.5 : 1 }}
+                        >
+                          {fieldSaving === `Email-${c.id}` ? "..." : "GUARDAR"}
+                        </button>
+                        <button
+                          onClick={() => setEmailTmp(prev => { const n = { ...prev }; delete n[c.id]; return n; })}
+                          style={{
+                            ...B.btnSm,
+                            background: "transparent",
+                            color: B.muted,
+                            border: `1px solid ${B.border}`
+                          }}
+                        >
+                          DESCARTAR
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 {/* Notas */}
                 <div onClick={e => e.stopPropagation()}>
                   <TxtArea
                     label="Notas internas"
-                    value={notaActual}
+                    value={notaValor}
                     onChange={txt => setNotasTmp(prev => ({ ...prev, [c.id]: txt }))}
                     ph="Apuntes sobre este cliente: condiciones especiales, contactos, recordatorios..."
                     rows={3}
@@ -382,17 +651,13 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
                     <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
                       <button
                         onClick={() => guardarNota(c.id)}
-                        disabled={notaSaving === c.id}
-                        style={{ ...B.btnSm, opacity: notaSaving === c.id ? 0.5 : 1 }}
+                        disabled={fieldSaving === `Notas-${c.id}`}
+                        style={{ ...B.btnSm, opacity: fieldSaving === `Notas-${c.id}` ? 0.5 : 1 }}
                       >
-                        {notaSaving === c.id ? "GUARDANDO..." : "GUARDAR NOTA"}
+                        {fieldSaving === `Notas-${c.id}` ? "GUARDANDO..." : "GUARDAR NOTA"}
                       </button>
                       <button
-                        onClick={() => setNotasTmp(prev => {
-                          const next = { ...prev };
-                          delete next[c.id];
-                          return next;
-                        })}
+                        onClick={() => setNotasTmp(prev => { const n = { ...prev }; delete n[c.id]; return n; })}
                         style={{
                           ...B.btnSm,
                           background: "transparent",
@@ -406,7 +671,7 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
                   )}
                 </div>
 
-                {/* Facturas */}
+                {/* Facturas del cliente */}
                 {c.fs.length > 0 && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     <Lbl>Facturas</Lbl>
@@ -474,6 +739,45 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
                     })}
                   </div>
                 )}
+
+                {/* ZONA DE PELIGRO: borrar cliente */}
+                <div style={{
+                  marginTop: 8,
+                  paddingTop: 16,
+                  borderTop: `1px dashed ${B.border}`
+                }}>
+                  <div style={{
+                    fontSize: 10,
+                    fontFamily: B.tM,
+                    color: B.muted,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    marginBottom: 10
+                  }}>
+                    Zona de peligro
+                  </div>
+                  <button
+                    onClick={e => {
+                      e.stopPropagation();
+                      borrarCliente(c.id, c.nombre, c.fs.length > 0);
+                    }}
+                    disabled={deletingClient === c.id}
+                    style={{
+                      ...B.btnDel,
+                      padding: "8px 16px",
+                      fontSize: 11,
+                      opacity: deletingClient === c.id ? 0.5 : (c.fs.length > 0 ? 0.6 : 1),
+                      cursor: c.fs.length > 0 ? "not-allowed" : "pointer"
+                    }}
+                    title={c.fs.length > 0 ? "Borra primero las facturas asociadas" : "Borrar cliente"}
+                  >
+                    {deletingClient === c.id
+                      ? "BORRANDO..."
+                      : c.fs.length > 0
+                        ? `🔒 NO SE PUEDE BORRAR (${c.fs.length} factura${c.fs.length > 1 ? "s" : ""})`
+                        : "🗑 BORRAR CLIENTE"}
+                  </button>
+                </div>
               </div>
             )}
           </div>
