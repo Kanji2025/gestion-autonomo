@@ -1,7 +1,7 @@
 // src/App.jsx
 // Cerebro principal: routing, autenticación, carga de datos y orquestación.
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 
 import { B, MENU } from "./utils.js";
 import { useResponsive } from "./hooks/useResponsive.js";
@@ -23,6 +23,75 @@ import AlertasView, { generateAutoAlerts, getPendingPopupAlerts } from "./compon
 
 const FONTS_LINK = "https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&family=Work+Sans:wght@400;500;600;700;800&display=swap";
 
+// ============================================================
+// COMPONENTE CAMPANITA DE NOTIFICACIONES
+// ============================================================
+function NotificationBell({ count, maxPriority, onClick, isMobile }) {
+  // Color del badge según prioridad máxima
+  const badgeColor = maxPriority === "Alta" ? B.red
+    : maxPriority === "Media" ? B.amber
+    : B.muted;
+
+  return (
+    <button
+      onClick={onClick}
+      title={count > 0 ? `${count} alerta${count > 1 ? "s" : ""} pendiente${count > 1 ? "s" : ""}` : "Sin alertas"}
+      style={{
+        background: "transparent",
+        border: "none",
+        cursor: "pointer",
+        padding: 6,
+        position: "relative",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center"
+      }}
+      aria-label="Notificaciones"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke={count > 0 ? B.text : B.muted}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{ width: isMobile ? 20 : 22, height: isMobile ? 20 : 22 }}
+      >
+        <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+        <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+      </svg>
+
+      {count > 0 && (
+        <span style={{
+          position: "absolute",
+          top: 0,
+          right: 0,
+          background: badgeColor,
+          color: "#fff",
+          fontSize: 10,
+          fontWeight: 700,
+          fontFamily: B.tM,
+          minWidth: 18,
+          height: 18,
+          borderRadius: 9,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "0 5px",
+          border: "2px solid rgba(255,255,255,0.9)",
+          boxSizing: "content-box",
+          lineHeight: 1
+        }}>
+          {count > 99 ? "99+" : count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+// ============================================================
+// APP
+// ============================================================
 export default function App() {
   // ============================================================
   // ESTADO
@@ -69,7 +138,7 @@ export default function App() {
         fetchTable("Gastos"),
         fetchTable("Clientes"),
         fetchTable("Tramos de Cotización"),
-        fetchTable("Alertas").catch(() => [])  // Si la tabla no existe, no rompe
+        fetchTable("Alertas").catch(() => [])
       ]);
       setI(i);
       setG(g);
@@ -79,7 +148,6 @@ export default function App() {
     } catch (e) {
       console.error("Error cargando datos:", e);
       setLoadError(e.message || "Error cargando datos");
-      // Si hay error de auth, deslogueamos
       if (e.message && e.message.includes("autorizado")) {
         logout();
         setAuth(false);
@@ -105,15 +173,41 @@ export default function App() {
     }
   }, [auth, loading, ingresos, gastos, tramos, alertas, popupShown]);
 
-  // Cerrar popup
-  const closePopup = () => {
-    setPopupAlerts([]);
-  };
+  // ============================================================
+  // CALCULAR INFO DE LA CAMPANITA
+  // ============================================================
+  const bellInfo = useMemo(() => {
+    if (!auth || loading) return { count: 0, maxPriority: "Baja" };
 
-  // Cuando se marca una alerta manual como mostrada, refrescamos
-  const onAlertDismissed = () => {
-    load();
-  };
+    const autoAlerts = generateAutoAlerts(ingresos, gastos, tramos);
+    const pending = getPendingPopupAlerts(alertas, autoAlerts);
+
+    // Contar también las manuales no mostradas (incluso si su fecha es futura)
+    const manualesNoMostradas = (alertas || []).filter(a => a.fields["Mostrada"] !== true).length;
+
+    // Contamos las pendientes únicas: pop-up actual + manuales programadas a futuro
+    const total = Math.max(pending.length, manualesNoMostradas);
+
+    // Calcular prioridad máxima
+    let maxPriority = "Baja";
+    for (const a of pending) {
+      if (a.prioridad === "Alta") { maxPriority = "Alta"; break; }
+      if (a.prioridad === "Media" && maxPriority !== "Alta") maxPriority = "Media";
+    }
+    if (maxPriority === "Baja") {
+      // Mirar también las manuales no procesadas en pop-up
+      for (const a of (alertas || [])) {
+        if (a.fields["Mostrada"] === true) continue;
+        if (a.fields["Prioridad"] === "Alta") { maxPriority = "Alta"; break; }
+        if (a.fields["Prioridad"] === "Media" && maxPriority !== "Alta") maxPriority = "Media";
+      }
+    }
+
+    return { count: total, maxPriority };
+  }, [auth, loading, ingresos, gastos, tramos, alertas]);
+
+  const closePopup = () => setPopupAlerts([]);
+  const onAlertDismissed = () => load();
 
   // ============================================================
   // RENDERS DE BLOQUEO
@@ -139,16 +233,9 @@ export default function App() {
       }}>
         <link href={FONTS_LINK} rel="stylesheet" />
         <div style={{ maxWidth: 480, width: "100%" }}>
-          <ErrorBox>
-            {loadError}
-          </ErrorBox>
+          <ErrorBox>{loadError}</ErrorBox>
           <div style={{ textAlign: "center", marginTop: 16 }}>
-            <button
-              onClick={() => load()}
-              style={B.btn}
-            >
-              REINTENTAR
-            </button>
+            <button onClick={() => load()} style={B.btn}>REINTENTAR</button>
             <button
               onClick={() => { logout(); setAuth(false); }}
               style={{
@@ -177,6 +264,8 @@ export default function App() {
           <Dashboard
             ingresos={ingresos}
             gastos={gastos}
+            tramos={tramos}
+            alertas={alertas}
             salObj={salObj}
             setSalObj={setSalObj}
             filtro={filtro}
@@ -235,6 +324,8 @@ export default function App() {
           <Dashboard
             ingresos={ingresos}
             gastos={gastos}
+            tramos={tramos}
+            alertas={alertas}
             salObj={salObj}
             setSalObj={setSalObj}
             filtro={filtro}
@@ -247,8 +338,6 @@ export default function App() {
   // ============================================================
   // LAYOUT PRINCIPAL
   // ============================================================
-  // En móvil/tablet portrait: el menú es un cajón overlay
-  // En tablet landscape o más grande: puede estar siempre visible o colapsable
   const sidebarOverlay = isPhoneOrSmallTablet;
   const sidebarWidth = open ? 240 : 0;
 
@@ -308,7 +397,7 @@ export default function App() {
           </span>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 16 }}>
           {!isMobile && (
             <span style={{ fontSize: 12, color: B.muted, whiteSpace: "nowrap" }}>
               {new Date().toLocaleDateString("es-ES", {
@@ -319,6 +408,15 @@ export default function App() {
               })}
             </span>
           )}
+
+          {/* CAMPANITA DE NOTIFICACIONES */}
+          <NotificationBell
+            count={bellInfo.count}
+            maxPriority={bellInfo.maxPriority}
+            isMobile={isMobile}
+            onClick={() => { setPage("alertas"); setOpen(false); }}
+          />
+
           <button
             onClick={() => { logout(); setAuth(false); }}
             style={{
@@ -337,7 +435,6 @@ export default function App() {
 
       {/* LAYOUT */}
       <div style={{ display: "flex", position: "relative" }}>
-        {/* Overlay oscuro cuando el menú está abierto en móvil */}
         {sidebarOverlay && open && (
           <div
             onClick={() => setOpen(false)}
@@ -354,7 +451,6 @@ export default function App() {
           />
         )}
 
-        {/* SIDEBAR */}
         <nav style={{
           width: sidebarWidth,
           overflow: "hidden",
@@ -403,7 +499,6 @@ export default function App() {
           </div>
         </nav>
 
-        {/* CONTENIDO PRINCIPAL */}
         <main style={{
           flex: 1,
           padding: isMobile ? 16 : 28,
