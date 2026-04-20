@@ -1,14 +1,48 @@
 // src/components/Clientes.jsx
 // Gestión de clientes con notas, estado activo/inactivo y facturas asociadas.
+// Usa actualización optimista para que los cambios de estado/notas se vean instantáneos.
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { B, fmt, hoy } from "../utils.js";
 import { useResponsive } from "../hooks/useResponsive.js";
 import { createRecord, updateRecord, deleteRecord } from "../api.js";
 import { Card, Lbl, Sem, SectionHeader, TxtArea } from "./UI.jsx";
 
 export default function Clientes({ clientes, ingresos, onRefresh }) {
-  const { isMobile, isPhoneOrSmallTablet } = useResponsive();
+  const { isMobile } = useResponsive();
+
+  // ============================================================
+  // OVERRIDES OPTIMISTAS (cambios locales mientras Airtable confirma)
+  // ============================================================
+  // Mapa de clienteId -> { activo?, notas? } con valores que sobrescriben
+  // los de Airtable mientras el servidor procesa la petición.
+  const [overrides, setOverrides] = useState({});
+
+  // Cuando llegan datos nuevos de Airtable, limpiamos los overrides
+  // que ya están reflejados en los datos del servidor.
+  useEffect(() => {
+    setOverrides(prev => {
+      const next = {};
+      for (const [id, ov] of Object.entries(prev)) {
+        const c = clientes.find(c => c.id === id);
+        if (!c) {
+          // El cliente ya no existe, descartar
+          continue;
+        }
+        const ovKept = {};
+        if (ov.activo !== undefined) {
+          const real = c.fields["Activo"] !== false;
+          if (real !== ov.activo) ovKept.activo = ov.activo;  // El servidor aún no lo refleja
+        }
+        if (ov.notas !== undefined) {
+          const real = c.fields["Notas"] || "";
+          if (real !== ov.notas) ovKept.notas = ov.notas;
+        }
+        if (Object.keys(ovKept).length > 0) next[id] = ovKept;
+      }
+      return next;
+    });
+  }, [clientes]);
 
   const [sel, setSel] = useState(null);
   const [del, setDel] = useState(null);
@@ -21,7 +55,7 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
   const [showInactive, setShowInactive] = useState(false);
   const [search, setSearch] = useState("");
 
-  // Estado local para edición de notas (clientId -> texto temporal)
+  // Estado local para edición de notas
   const [notasTmp, setNotasTmp] = useState({});
   const [notaSaving, setNotaSaving] = useState(null);
 
@@ -73,9 +107,13 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
     const texto = notasTmp[clienteId];
     if (texto === undefined) return;
     setNotaSaving(clienteId);
+
+    // Override optimista: la UI muestra el nuevo valor inmediatamente
+    setOverrides(prev => ({ ...prev, [clienteId]: { ...(prev[clienteId] || {}), notas: texto } }));
+
     try {
       await updateRecord("Clientes", clienteId, { "Notas": texto });
-      // Limpiar el temporal y refrescar
+      // Limpiar el temporal
       setNotasTmp(prev => {
         const next = { ...prev };
         delete next[clienteId];
@@ -83,30 +121,65 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
       });
       await onRefresh();
     } catch (e) {
+      // Revertir override en caso de error
+      setOverrides(prev => {
+        const next = { ...prev };
+        if (next[clienteId]) {
+          const { notas, ...rest } = next[clienteId];
+          if (Object.keys(rest).length > 0) next[clienteId] = rest;
+          else delete next[clienteId];
+        }
+        return next;
+      });
       alert("Error guardando notas: " + e.message);
     }
     setNotaSaving(null);
   };
 
   const toggleActivo = async (clienteId, activoActual) => {
+    const nuevoEstado = !activoActual;
     setActivoSaving(clienteId);
+
+    // Actualización optimista: la UI cambia YA, sin esperar al servidor
+    setOverrides(prev => ({
+      ...prev,
+      [clienteId]: { ...(prev[clienteId] || {}), activo: nuevoEstado }
+    }));
+
     try {
-      await updateRecord("Clientes", clienteId, { "Activo": !activoActual });
+      await updateRecord("Clientes", clienteId, { "Activo": nuevoEstado });
       await onRefresh();
     } catch (e) {
+      // Revertir override en caso de error
+      setOverrides(prev => {
+        const next = { ...prev };
+        if (next[clienteId]) {
+          const { activo, ...rest } = next[clienteId];
+          if (Object.keys(rest).length > 0) next[clienteId] = rest;
+          else delete next[clienteId];
+        }
+        return next;
+      });
       alert("Error cambiando estado: " + e.message);
     }
     setActivoSaving(null);
   };
 
   // ============================================================
-  // PROCESAR DATOS DE CLIENTES
+  // PROCESAR DATOS DE CLIENTES (aplicando overrides)
   // ============================================================
   const cd = clientes
     .map(c => {
       const n = c.fields["Nombre"] || "Sin nombre";
-      const activo = c.fields["Activo"] !== false;  // Si no está definido, asumimos activo
-      const notas = c.fields["Notas"] || "";
+      const ov = overrides[c.id] || {};
+
+      // Aplicar overrides optimistas
+      const activoReal = c.fields["Activo"] !== false;
+      const activo = ov.activo !== undefined ? ov.activo : activoReal;
+
+      const notasReal = c.fields["Notas"] || "";
+      const notas = ov.notas !== undefined ? ov.notas : notasReal;
+
       const fIds = c.fields["Ingresos"] || [];
       const fs = ingresos.filter(r => fIds.includes(r.id));
       const totBase = fs.reduce((s, f) => s + (f.fields["Base Imponible"] || 0), 0);
@@ -114,6 +187,7 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
       const benefNeto = totBase - totIrpf;
       const p = fs.filter(f => f.fields["Estado"] === "Pendiente").length;
       const v = fs.filter(f => f.fields["Estado"] === "Vencida").length;
+
       return {
         id: c.id,
         nombre: n,
@@ -134,7 +208,13 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
       return true;
     });
 
-  const totalActivos = clientes.filter(c => c.fields["Activo"] !== false).length;
+  // Contadores también deben aplicar overrides
+  const totalActivos = clientes.filter(c => {
+    const ov = overrides[c.id] || {};
+    const real = c.fields["Activo"] !== false;
+    const efectivo = ov.activo !== undefined ? ov.activo : real;
+    return efectivo;
+  }).length;
   const totalInactivos = clientes.length - totalActivos;
 
   // ============================================================
@@ -246,7 +326,8 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
               padding: 20,
               border: `1px solid ${B.border}`,
               borderLeft: `4px solid ${c.bc}`,
-              opacity: c.activo ? 1 : 0.65
+              opacity: c.activo ? 1 : 0.65,
+              transition: "opacity 0.2s ease"
             }}
           >
             {/* Cabecera (clickable) */}
@@ -341,7 +422,8 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
                   alignItems: "center",
                   gap: 12,
                   paddingBottom: 12,
-                  borderBottom: `1px solid ${B.border}`
+                  borderBottom: `1px solid ${B.border}`,
+                  flexWrap: "wrap"
                 }}>
                   <Lbl>Estado del cliente</Lbl>
                   <button
@@ -350,10 +432,13 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
                     style={{
                       ...B.btnSm,
                       background: c.activo ? B.green : B.muted,
-                      opacity: activoSaving === c.id ? 0.5 : 1
+                      opacity: activoSaving === c.id ? 0.5 : 1,
+                      transition: "background 0.2s ease"
                     }}
                   >
-                    {activoSaving === c.id ? "..." : c.activo ? "ACTIVO" : "INACTIVO"} · CAMBIAR
+                    {activoSaving === c.id
+                      ? "GUARDANDO..."
+                      : c.activo ? "ACTIVO · CAMBIAR A INACTIVO" : "INACTIVO · CAMBIAR A ACTIVO"}
                   </button>
                 </div>
 
