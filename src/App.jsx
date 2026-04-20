@@ -1,5 +1,5 @@
 // src/App.jsx
-// Cerebro principal: routing, autenticación, carga de datos y orquestación.
+// Cerebro principal: routing, autenticación, carga de datos, campanita, pop-up.
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 
@@ -19,32 +19,41 @@ import Clientes from "./components/Clientes.jsx";
 import GastosView from "./components/Gastos.jsx";
 import Simulador from "./components/Simulador.jsx";
 import CuotaAut from "./components/CuotaAut.jsx";
-import AlertasView, { generateAutoAlerts, getPendingPopupAlerts } from "./components/Alertas.jsx";
+import AlertasView, {
+  generateAutoAlerts,
+  getPendingAlerts,
+  cleanupDismissed
+} from "./components/Alertas.jsx";
+import NotificationDropdown from "./components/NotificationDropdown.jsx";
 
 const FONTS_LINK = "https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&family=Work+Sans:wght@400;500;600;700;800&display=swap";
 
+const POPUP_SHOWN_DATE_KEY = "ga_popup_shown_date";
+
 // ============================================================
-// COMPONENTE CAMPANITA DE NOTIFICACIONES
+// COMPONENTE CAMPANITA
 // ============================================================
-function NotificationBell({ count, maxPriority, onClick, isMobile }) {
-  // Color del badge según prioridad máxima
+function NotificationBell({ count, maxPriority, onClick, isMobile, active }) {
   const badgeColor = maxPriority === "Alta" ? B.red
     : maxPriority === "Media" ? B.amber
     : B.muted;
 
   return (
     <button
+      data-bell-button
       onClick={onClick}
       title={count > 0 ? `${count} alerta${count > 1 ? "s" : ""} pendiente${count > 1 ? "s" : ""}` : "Sin alertas"}
       style={{
-        background: "transparent",
+        background: active ? "rgba(0,0,0,0.06)" : "transparent",
         border: "none",
         cursor: "pointer",
         padding: 6,
         position: "relative",
         display: "flex",
         alignItems: "center",
-        justifyContent: "center"
+        justifyContent: "center",
+        borderRadius: 6,
+        transition: "background 0.15s ease"
       }}
       aria-label="Notificaciones"
     >
@@ -90,12 +99,30 @@ function NotificationBell({ count, maxPriority, onClick, isMobile }) {
 }
 
 // ============================================================
+// HELPER: ¿el popup ya se mostró hoy en este dispositivo?
+// ============================================================
+function popupAlreadyShownToday() {
+  try {
+    const last = localStorage.getItem(POPUP_SHOWN_DATE_KEY);
+    if (!last) return false;
+    const today = new Date().toISOString().split("T")[0];
+    return last === today;
+  } catch {
+    return false;
+  }
+}
+
+function markPopupShownToday() {
+  try {
+    const today = new Date().toISOString().split("T")[0];
+    localStorage.setItem(POPUP_SHOWN_DATE_KEY, today);
+  } catch {}
+}
+
+// ============================================================
 // APP
 // ============================================================
 export default function App() {
-  // ============================================================
-  // ESTADO
-  // ============================================================
   const [auth, setAuth] = useState(() => isLoggedIn());
   const [page, setPage] = useState("dashboard");
   const [open, setOpen] = useState(false);
@@ -119,9 +146,13 @@ export default function App() {
     mes: ""
   });
 
-  // Pop-up de alertas
+  // Pop-up y dropdown
   const [popupAlerts, setPopupAlerts] = useState([]);
-  const [popupShown, setPopupShown] = useState(false);
+  const [popupCheckedThisSession, setPopupCheckedThisSession] = useState(false);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+
+  // Contador de "refresh" para forzar re-render cuando cambian los descartes locales
+  const [bellRefreshCounter, setBellRefreshCounter] = useState(0);
 
   const responsive = useResponsive();
   const { isMobile, isPhoneOrSmallTablet } = responsive;
@@ -160,54 +191,72 @@ export default function App() {
     if (auth) load();
   }, [auth, load]);
 
-  // Calcular alertas pendientes para popup tras cargar datos
-  useEffect(() => {
-    if (!auth || loading || popupShown) return;
+  // Refresco que también actualiza el contador de la campana (sin re-cargar de Airtable)
+  const refreshLocal = useCallback(() => {
+    setBellRefreshCounter(c => c + 1);
+  }, []);
 
-    const autoAlerts = generateAutoAlerts(ingresos, gastos, tramos);
-    const pending = getPendingPopupAlerts(alertas, autoAlerts);
-
-    if (pending.length > 0) {
-      setPopupAlerts(pending);
-      setPopupShown(true);
-    }
-  }, [auth, loading, ingresos, gastos, tramos, alertas, popupShown]);
+  // Refresco completo tras marcar una alerta: recargamos Airtable Y actualizamos contador
+  const refreshAll = useCallback(async () => {
+    await load();
+    refreshLocal();
+  }, [load, refreshLocal]);
 
   // ============================================================
-  // CALCULAR INFO DE LA CAMPANITA
+  // CALCULAR ALERTAS PENDIENTES (para campana y popup)
+  // ============================================================
+  const cuotaActual = (() => {
+    try { return Number(localStorage.getItem("ga_cuota")) || 294; } catch { return 294; }
+  })();
+
+  const pendingAlerts = useMemo(() => {
+    if (!auth || loading) return [];
+    // bellRefreshCounter: dependencia artificial para forzar recálculo cuando se marca una alerta como leída
+    void bellRefreshCounter;
+    const autoAlerts = generateAutoAlerts(ingresos, gastos, tramos, cuotaActual);
+    return getPendingAlerts(alertas, autoAlerts);
+  }, [auth, loading, ingresos, gastos, tramos, alertas, cuotaActual, bellRefreshCounter]);
+
+  // Limpiar descartes antiguos (huellas que ya no existen) al cargar
+  useEffect(() => {
+    if (!auth || loading) return;
+    // Recalculamos TODAS las automáticas ignorando descartes, para saber las huellas vivas
+    const allAutos = generateAutoAlerts(ingresos, gastos, tramos, cuotaActual, { ignoreDismissed: true });
+    const activeFingerprints = {};
+    allAutos.forEach(a => {
+      activeFingerprints[a.id] = a.fingerprint;
+    });
+    cleanupDismissed(activeFingerprints);
+  }, [auth, loading, ingresos, gastos, tramos, cuotaActual]);
+
+  // Disparar pop-up una vez al día (solo la primera carga de la sesión)
+  useEffect(() => {
+    if (!auth || loading || popupCheckedThisSession) return;
+    setPopupCheckedThisSession(true);
+
+    if (popupAlreadyShownToday()) return;
+    if (pendingAlerts.length === 0) return;
+
+    setPopupAlerts(pendingAlerts);
+    markPopupShownToday();
+  }, [auth, loading, popupCheckedThisSession, pendingAlerts]);
+
+  // ============================================================
+  // INFO DE LA CAMPANA (contador y prioridad máxima)
   // ============================================================
   const bellInfo = useMemo(() => {
-    if (!auth || loading) return { count: 0, maxPriority: "Baja" };
-
-    const autoAlerts = generateAutoAlerts(ingresos, gastos, tramos);
-    const pending = getPendingPopupAlerts(alertas, autoAlerts);
-
-    // Contar también las manuales no mostradas (incluso si su fecha es futura)
-    const manualesNoMostradas = (alertas || []).filter(a => a.fields["Mostrada"] !== true).length;
-
-    // Contamos las pendientes únicas: pop-up actual + manuales programadas a futuro
-    const total = Math.max(pending.length, manualesNoMostradas);
-
-    // Calcular prioridad máxima
     let maxPriority = "Baja";
-    for (const a of pending) {
+    for (const a of pendingAlerts) {
       if (a.prioridad === "Alta") { maxPriority = "Alta"; break; }
       if (a.prioridad === "Media" && maxPriority !== "Alta") maxPriority = "Media";
     }
-    if (maxPriority === "Baja") {
-      // Mirar también las manuales no procesadas en pop-up
-      for (const a of (alertas || [])) {
-        if (a.fields["Mostrada"] === true) continue;
-        if (a.fields["Prioridad"] === "Alta") { maxPriority = "Alta"; break; }
-        if (a.fields["Prioridad"] === "Media" && maxPriority !== "Alta") maxPriority = "Media";
-      }
-    }
-
-    return { count: total, maxPriority };
-  }, [auth, loading, ingresos, gastos, tramos, alertas]);
+    return { count: pendingAlerts.length, maxPriority };
+  }, [pendingAlerts]);
 
   const closePopup = () => setPopupAlerts([]);
-  const onAlertDismissed = () => load();
+  const onAlertDismissed = async () => {
+    await refreshAll();
+  };
 
   // ============================================================
   // RENDERS DE BLOQUEO
@@ -306,7 +355,7 @@ export default function App() {
             ingresos={ingresos}
             gastos={gastos}
             tramos={tramos}
-            onRefresh={load}
+            onRefresh={refreshAll}
           />
         );
       case "simulador":
@@ -409,12 +458,13 @@ export default function App() {
             </span>
           )}
 
-          {/* CAMPANITA DE NOTIFICACIONES */}
+          {/* CAMPANITA → ABRE DROPDOWN */}
           <NotificationBell
             count={bellInfo.count}
             maxPriority={bellInfo.maxPriority}
             isMobile={isMobile}
-            onClick={() => { setPage("alertas"); setOpen(false); }}
+            active={dropdownOpen}
+            onClick={() => setDropdownOpen(!dropdownOpen)}
           />
 
           <button
@@ -511,12 +561,22 @@ export default function App() {
         </main>
       </div>
 
-      {/* POP-UP DE ALERTAS */}
+      {/* POP-UP DE ALERTAS (solo una vez al día) */}
       {popupAlerts.length > 0 && (
         <AlertPopup
           alertas={popupAlerts}
           onClose={closePopup}
           onDismissed={onAlertDismissed}
+        />
+      )}
+
+      {/* DROPDOWN DE LA CAMPANITA */}
+      {dropdownOpen && (
+        <NotificationDropdown
+          alertas={pendingAlerts}
+          onClose={() => setDropdownOpen(false)}
+          onGoToAlerts={() => setPage("alertas")}
+          onChange={refreshAll}
         />
       )}
     </div>
