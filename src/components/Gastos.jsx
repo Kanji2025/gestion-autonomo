@@ -1,16 +1,17 @@
 // src/components/Gastos.jsx
-// Lista y alta de gastos. Calcula cuánto apartar al mes según la periodicidad.
+// Lista y alta de gastos. Soporta alta rápida manual + alta con OCR (vía IA).
 
 import { useState } from "react";
 import { B, fmt, hoy, applyF } from "../utils.js";
 import { useResponsive } from "../hooks/useResponsive.js";
 import { createRecord, deleteRecord } from "../api.js";
 import { Card, Lbl, Inp, Sel, FilterBar, SectionHeader } from "./UI.jsx";
+import NuevoForm from "./NuevoForm.jsx";
 
 export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
   const { isMobile, formColumns } = useResponsive();
 
-  const [showF, setShowF] = useState(false);
+  const [mode, setMode] = useState("lista");  // "lista" | "ocr" | "manual"
   const [sav, setSav] = useState(false);
   const [delId, setDelId] = useState(null);
   const [form, setForm] = useState({
@@ -23,6 +24,23 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
     period: ""
   });
 
+  // ============================================================
+  // VISTA OCR (delegada al NuevoForm con tipo bloqueado a gasto)
+  // ============================================================
+  if (mode === "ocr") {
+    return (
+      <NuevoForm
+        defaultTipo="gasto"
+        lockTipo={true}
+        onClose={() => { setMode("lista"); onRefresh(); }}
+        onSaved={() => { onRefresh(); }}
+      />
+    );
+  }
+
+  // ============================================================
+  // CÁLCULOS DE LA LISTA
+  // ============================================================
   const fg = applyF(gastos, filtro);
   const fijos = fg.filter(r => ["Mensual", "Anual", "Trimestral"].includes(r.fields["Periodicidad"]));
   const vars = fg.filter(r => !["Mensual", "Anual", "Trimestral"].includes(r.fields["Periodicidad"]));
@@ -33,6 +51,9 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
     return s + (p === "Mensual" ? b : p === "Trimestral" ? b / 3 : p === "Anual" ? b / 12 : 0);
   }, 0);
 
+  // ============================================================
+  // ACCIONES
+  // ============================================================
   const save = async () => {
     if (!form.concepto || !form.base) return;
     setSav(true);
@@ -49,7 +70,7 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
 
       await createRecord("Gastos", f);
       setForm({ concepto: "", fecha: hoy(), base: "", iva: "", irpf: "", tipo: "", period: "" });
-      setShowF(false);
+      setMode("lista");
       await onRefresh();
     } catch (e) {
       alert("Error al guardar: " + e.message);
@@ -68,23 +89,38 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
     setDelId(null);
   };
 
+  // ============================================================
+  // VISTA LISTA
+  // ============================================================
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
       <SectionHeader
         title="Gastos y Prorrateo"
         action={
-          <button onClick={() => setShowF(!showF)} style={B.btn}>
-            {showF ? "CANCELAR" : "+ NUEVO GASTO"}
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={() => setMode("ocr")} style={{
+              ...B.btn,
+              background: B.purple,
+              border: `2px solid ${B.purple}`
+            }}>
+              📷 OCR / IA
+            </button>
+            <button
+              onClick={() => setMode(mode === "manual" ? "lista" : "manual")}
+              style={B.btn}
+            >
+              {mode === "manual" ? "CANCELAR" : "+ MANUAL"}
+            </button>
+          </div>
         }
       />
 
       <FilterBar filtro={filtro} setFiltro={setFiltro} />
 
-      {/* Formulario nuevo gasto */}
-      {showF && (
+      {/* Formulario manual rápido */}
+      {mode === "manual" && (
         <Card style={{ border: `2px solid ${B.purple}` }}>
-          <Lbl>Añadir Gasto</Lbl>
+          <Lbl>Añadir Gasto Manual</Lbl>
           <div style={{
             display: "grid",
             gridTemplateColumns: `repeat(${formColumns}, 1fr)`,
@@ -229,7 +265,7 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
       {fg.length === 0 && (
         <Card>
           <p style={{ color: B.muted, fontFamily: B.tS, margin: 0 }}>
-            No hay gastos en este período. Añade uno con el botón de arriba o sube un ticket desde la sección Facturas → Tipo: Gasto.
+            No hay gastos en este período. Pulsa "📷 OCR / IA" para subir un ticket o "+ MANUAL" para introducir uno a mano.
           </p>
         </Card>
       )}
