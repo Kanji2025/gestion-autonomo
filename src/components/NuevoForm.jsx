@@ -1,7 +1,7 @@
 // src/components/NuevoForm.jsx
 // Formulario universal para añadir Factura (ingreso) o Ticket/Gasto.
 // Soporta OCR (con IA para gastos) y entrada manual.
-// Reutilizable desde Facturas.jsx y Gastos.jsx.
+// Al guardar factura, el CIF detectado se guarda también en el cliente.
 
 import { useState } from "react";
 import { B, hoy, convD } from "../utils.js";
@@ -48,7 +48,8 @@ function parseFactura(text) {
   const fM = t.match(/(?:fecha(?:\s+de\s+factura)?)[:\s]*\n?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i) ||
              t.match(/(\d{2}[\/-]\d{2}[\/-]\d{4})/);
   const fecha = fM ? fM[1] : "";
-  const cifM = t.match(/(\d{8}[A-Z])/);
+  // CIF español: letra+8 dígitos, 8 dígitos+letra (NIF), o B/A+8 dígitos (CIF empresa)
+  const cifM = t.match(/([A-Z]\d{8}|\d{8}[A-Z])/);
   const cif = cifM ? cifM[0] : "";
 
   let base = 0, iva = 0, irpf = 0, total = 0;
@@ -124,7 +125,7 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
   const [drag, setDrag] = useState(false);
   const [proc, setProc] = useState(false);
   const [procStep, setProcStep] = useState("");
-  const [mode, setMode] = useState("choose");  // "choose" | "ocr" | "manual"
+  const [mode, setMode] = useState("choose");
   const [res, setRes] = useState(null);
   const [tipo, setTipo] = useState(defaultTipo);
   const [sav, setSav] = useState(false);
@@ -239,12 +240,17 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
         if (fecha) f["Fecha"] = fecha;
         if (fechaV) f["Fecha Vencimiento"] = fechaV;
         if (fechaC) f["Fecha Cobro"] = fechaC;
+
+        // Buscar/crear cliente pasando también el CIF si lo tenemos
         if (cliente && cliente.trim()) {
-          const cId = await findOrCreateClient(cliente.trim());
+          const cifLimpio = cif && cif.trim() ? cif.trim() : null;
+          const cId = await findOrCreateClient(cliente.trim(), cifLimpio);
           if (cId) f["Cliente"] = [cId];
         }
+
         await createRecord("Ingresos", f);
       } else {
+        // Gasto
         const f = {
           "Concepto": concepto || desc || proveedor || "Gasto",
           "Base Imponible": Number(base) || 0,
@@ -284,7 +290,6 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
         }
       />
 
-      {/* Selector de tipo (solo si no está bloqueado) */}
       {!lockTipo && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
@@ -316,7 +321,6 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
         </div>
       )}
 
-      {/* Selector OCR vs Manual */}
       {!saved && (
         <div style={{ display: "flex", gap: 8 }}>
           <button
@@ -346,7 +350,6 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
         </div>
       )}
 
-      {/* Zona de drop / OCR */}
       {(mode === "choose" || mode === "ocr") && !res && !saved && (
         <div
           onDragOver={e => { e.preventDefault(); setDrag(true); }}
@@ -403,7 +406,6 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
 
       <ErrorBox>{err}</ErrorBox>
 
-      {/* Formulario de revisión / introducción */}
       {ready && !saved && (
         <Card style={{ border: `2px solid ${mode === "ocr" ? B.green : B.purple}` }}>
           <Lbl>
@@ -422,7 +424,7 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
               <Inp label="Nº Factura" value={numero} onChange={sNumero} ph="F00012026" />
               <Inp label="Fecha" value={fecha} onChange={sFecha} type="date" />
               <Inp label="Cliente" value={cliente} onChange={sCliente} ph="Nombre del cliente" />
-              <Inp label="CIF/NIF" value={cif} onChange={sCif} ph="12345678A" />
+              <Inp label="CIF/NIF" value={cif} onChange={sCif} ph="B12345678" />
               <Inp label="Base Imponible (€)" value={base} onChange={sBase} type="number" ph="0" />
               <Inp label="IVA (€)" value={iva} onChange={sIva} type="number" ph="Auto" />
               <Inp label="IRPF (€)" value={irpf} onChange={sIrpf} type="number" ph="Auto" />
@@ -450,6 +452,20 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
             </div>
           )}
 
+          {tipo === "ingreso" && cif && cliente && (
+            <div style={{
+              marginTop: 10,
+              padding: "8px 12px",
+              background: B.purple + "10",
+              borderRadius: 6,
+              fontSize: 11,
+              color: B.purple,
+              fontFamily: B.tS
+            }}>
+              ℹ️ El CIF se guardará también en la ficha del cliente «{cliente}»
+            </div>
+          )}
+
           <button
             onClick={handleSave}
             disabled={sav}
@@ -460,7 +476,6 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
         </Card>
       )}
 
-      {/* Pantalla de éxito */}
       {saved && (
         <Card style={{ border: `2px solid ${B.green}` }}>
           <div style={{ textAlign: "center", padding: 20 }}>
