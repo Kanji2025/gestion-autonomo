@@ -1,5 +1,7 @@
 // src/components/Alertas.jsx
 // Alertas manuales (guardadas en Airtable) + automáticas (calculadas en vivo).
+// Las automáticas se pueden "marcar como leídas" localmente.
+// Reaparecen si la situación cambia (ej: cambias la cuota).
 
 import { useState, useMemo } from "react";
 import { B, fmt, hoy, getTrimestre } from "../utils.js";
@@ -8,9 +10,51 @@ import { createRecord, updateRecord, deleteRecord } from "../api.js";
 import { Card, Lbl, Inp, Sel, SectionHeader, ErrorBox, TxtArea } from "./UI.jsx";
 
 // ============================================================
+// DESCARTE LOCAL DE ALERTAS AUTOMÁTICAS
+// ============================================================
+// Guardamos en localStorage una "huella" del contexto de cada alerta.
+// Si la huella cambia, la alerta reaparece.
+const DISMISS_KEY = "ga_auto_alerts_dismissed";
+
+function readDismissed() {
+  try {
+    const raw = localStorage.getItem(DISMISS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeDismissed(obj) {
+  try {
+    localStorage.setItem(DISMISS_KEY, JSON.stringify(obj));
+  } catch {}
+}
+
+export function dismissAutoAlert(id, fingerprint) {
+  const all = readDismissed();
+  all[id] = { fingerprint, dismissedAt: new Date().toISOString() };
+  writeDismissed(all);
+}
+
+export function clearAllAutoAlertsDismissed() {
+  writeDismissed({});
+}
+
+function isAutoAlertDismissed(id, currentFingerprint) {
+  const all = readDismissed();
+  const entry = all[id];
+  if (!entry) return false;
+  // Si la huella coincide con la descartada, sigue descartada
+  return entry.fingerprint === currentFingerprint;
+}
+
+// ============================================================
 // GENERAR ALERTAS AUTOMÁTICAS
 // ============================================================
-export function generateAutoAlerts(ingresos, gastos, tramos, ca = 294) {
+// Cada una tiene un "fingerprint" que cambia si el contexto cambia,
+// haciéndola reaparecer tras un descarte local.
+export function generateAutoAlerts(ingresos, gastos, tramos, cuotaActual = 294) {
   const alerts = [];
   const now = new Date();
 
@@ -18,9 +62,12 @@ export function generateAutoAlerts(ingresos, gastos, tramos, ca = 294) {
   const vencidas = ingresos.filter(r => r.fields["Estado"] === "Vencida");
   if (vencidas.length > 0) {
     const importe = vencidas.reduce((s, r) => s + (r.fields["Base Imponible"] || 0), 0);
+    // Huella: cantidad de vencidas + importe redondeado
+    const fingerprint = `${vencidas.length}-${Math.round(importe)}`;
     alerts.push({
       id: "auto-vencidas",
       source: "auto",
+      fingerprint,
       tipo: "Factura Vencida",
       prioridad: "Alta",
       titulo: `${vencidas.length} factura${vencidas.length > 1 ? "s" : ""} vencida${vencidas.length > 1 ? "s" : ""}`,
@@ -30,18 +77,16 @@ export function generateAutoAlerts(ingresos, gastos, tramos, ca = 294) {
   }
 
   // ---- 2. Cierre de IVA trimestral próximo ----
-  // Las fechas límite del modelo 303: 20 abril (Q1), 20 julio (Q2), 20 octubre (Q3), 30 enero (Q4)
   const limites = [
-    { tri: "Q1", date: new Date(now.getFullYear(), 3, 20) },   // 20 abril
-    { tri: "Q2", date: new Date(now.getFullYear(), 6, 20) },   // 20 julio
-    { tri: "Q3", date: new Date(now.getFullYear(), 9, 20) },   // 20 octubre
-    { tri: "Q4", date: new Date(now.getFullYear() + 1, 0, 30) } // 30 enero año siguiente
+    { tri: "Q1", date: new Date(now.getFullYear(), 3, 20) },
+    { tri: "Q2", date: new Date(now.getFullYear(), 6, 20) },
+    { tri: "Q3", date: new Date(now.getFullYear(), 9, 20) },
+    { tri: "Q4", date: new Date(now.getFullYear() + 1, 0, 30) }
   ];
 
   for (const lim of limites) {
     const diasRestantes = Math.floor((lim.date - now) / 86400000);
     if (diasRestantes >= 0 && diasRestantes <= 10) {
-      // Calcular IVA acumulado del trimestre
       const ivaR = ingresos
         .filter(r => r.fields["Fecha"] && getTrimestre(r.fields["Fecha"]) === lim.tri)
         .reduce((s, r) => s + (r.fields["IVA (€)"] || 0), 0);
@@ -50,16 +95,21 @@ export function generateAutoAlerts(ingresos, gastos, tramos, ca = 294) {
         .reduce((s, r) => s + (r.fields["IVA Soportado (€)"] || 0), 0);
       const aIngresar = ivaR - ivaS;
 
+      // Huella: trimestre + días restantes redondeados a bucket de 3 días
+      const bucket = Math.floor(diasRestantes / 3);
+      const fingerprint = `${lim.tri}-${bucket}`;
+
       alerts.push({
         id: `auto-iva-${lim.tri}`,
         source: "auto",
+        fingerprint,
         tipo: "IVA Trimestre",
         prioridad: diasRestantes <= 3 ? "Alta" : "Media",
         titulo: `Cierre IVA ${lim.tri} en ${diasRestantes} día${diasRestantes !== 1 ? "s" : ""}`,
         mensaje: `El plazo del modelo 303 para ${lim.tri} cierra el ${lim.date.toLocaleDateString("es-ES")}. Importe a ingresar estimado: ${fmt(aIngresar)} (IVA repercutido ${fmt(ivaR)} − IVA soportado ${fmt(ivaS)}).`,
         fecha: lim.date.toLocaleDateString("es-ES")
       });
-      break;  // Solo un aviso de IVA a la vez
+      break;
     }
   }
 
@@ -68,7 +118,7 @@ export function generateAutoAlerts(ingresos, gastos, tramos, ca = 294) {
     const tI = ingresos.reduce((s, r) => s + (r.fields["Base Imponible"] || 0), 0);
     const tG = gastos.reduce((s, r) => s + (r.fields["Base Imponible"] || 0), 0);
     const ms = Math.max(now.getMonth() + 1, 1);
-    const rn = ((tI - tG - (ca * ms)) * 0.93) / ms;
+    const rn = ((tI - tG - (cuotaActual * ms)) * 0.93) / ms;
 
     const td = tramos.map(r => ({
       tramo: r.fields["Tramo"] || 0,
@@ -82,17 +132,20 @@ export function generateAutoAlerts(ingresos, gastos, tramos, ca = 294) {
       : (td.find(t => rn >= t.min && rn < t.max) || td[0]);
 
     if (tr) {
-      const diff = tr.cuota - ca;
-      // Solo avisamos si la diferencia es relevante (>20€)
+      const diff = tr.cuota - cuotaActual;
       if (Math.abs(diff) > 20) {
+        // Huella: cuota actual + tramo sugerido. Si la cuota cambia o el tramo cambia, reaparece.
+        const fingerprint = `${cuotaActual}-${tr.tramo}`;
+
         alerts.push({
           id: "auto-cuota",
           source: "auto",
+          fingerprint,
           tipo: "Cuota Autónomos",
           prioridad: diff > 50 ? "Alta" : "Media",
           titulo: diff > 0 ? "Pagas menos cuota de la que toca" : "Pagas más cuota de la que toca",
           mensaje: diff > 0
-            ? `Según tu rendimiento neto (${fmt(rn)}/mes) deberías estar en el tramo ${tr.tramo} con cuota de ${fmt(tr.cuota)}/mes. Pagas ${fmt(ca)}, faltan ${fmt(diff)}/mes que se acumulan como deuda.`
+            ? `Según tu rendimiento neto (${fmt(rn)}/mes) deberías estar en el tramo ${tr.tramo} con cuota de ${fmt(tr.cuota)}/mes. Pagas ${fmt(cuotaActual)}, faltan ${fmt(diff)}/mes que se acumulan como deuda.`
             : `Según tu rendimiento (${fmt(rn)}/mes) podrías bajar al tramo ${tr.tramo} con cuota de ${fmt(tr.cuota)}/mes y ahorrar ${fmt(Math.abs(diff))}/mes.`,
           fecha: hoy()
         });
@@ -104,7 +157,7 @@ export function generateAutoAlerts(ingresos, gastos, tramos, ca = 294) {
 }
 
 // ============================================================
-// CONVERTIR ALERTAS DE AIRTABLE A FORMATO INTERNO
+// CONVERTIR ALERTA DE AIRTABLE A FORMATO INTERNO
 // ============================================================
 export function airtableToAlert(record) {
   return {
@@ -123,10 +176,14 @@ export function airtableToAlert(record) {
 }
 
 // ============================================================
-// FILTRAR ALERTAS PENDIENTES PARA EL POPUP
+// ALERTAS PENDIENTES PARA LA CAMPANITA Y EL DROPDOWN
 // ============================================================
-export function getPendingPopupAlerts(alertasAirtable, autoAlerts) {
+// Devuelve las alertas activas + no descartadas localmente + no marcadas
+// como mostradas en Airtable. Este es el contador "real" de la campana.
+export function getPendingAlertsForBell(alertasAirtable, autoAlerts) {
   const now = new Date();
+
+  // Manuales: no mostradas y con fecha <= ahora
   const manualPending = alertasAirtable
     .map(airtableToAlert)
     .filter(a => {
@@ -135,13 +192,40 @@ export function getPendingPopupAlerts(alertasAirtable, autoAlerts) {
       return new Date(a.fechaHora) <= now;
     });
 
-  // Las automáticas SIEMPRE se muestran en popup mientras estén activas
-  // (no tienen estado "mostrada" porque se recalculan en cada carga)
-  return [...manualPending, ...autoAlerts];
+  // Automáticas: no descartadas localmente
+  const autoPending = autoAlerts.filter(
+    a => !isAutoAlertDismissed(a.id, a.fingerprint)
+  );
+
+  return [...manualPending, ...autoPending];
 }
 
 // ============================================================
-// COLOR POR PRIORIDAD
+// ALERTAS PARA EL POP-UP (sólo prioridad Alta + no mostradas hoy)
+// ============================================================
+const POPUP_SHOWN_KEY = "ga_popup_shown_date";
+
+export function getPendingPopupAlerts(alertasAirtable, autoAlerts) {
+  const today = new Date().toISOString().slice(0, 10);
+  let lastShown;
+  try { lastShown = localStorage.getItem(POPUP_SHOWN_KEY); } catch { lastShown = null; }
+
+  // Si ya lo mostramos hoy, no volver a mostrar
+  if (lastShown === today) return [];
+
+  const pending = getPendingAlertsForBell(alertasAirtable, autoAlerts);
+  // Filtramos sólo las de prioridad Alta
+  return pending.filter(a => a.prioridad === "Alta");
+}
+
+export function markPopupShownToday() {
+  try {
+    localStorage.setItem(POPUP_SHOWN_KEY, new Date().toISOString().slice(0, 10));
+  } catch {}
+}
+
+// ============================================================
+// COLOR / EMOJI
 // ============================================================
 function colorForPriority(p) {
   if (p === "Alta") return B.red;
@@ -168,14 +252,15 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
   const [delId, setDelId] = useState(null);
+  const [markingId, setMarkingId] = useState(null);
+  const [markingAll, setMarkingAll] = useState(false);
   const [err, setErr] = useState("");
 
-  // Form
   const fechaPorDefecto = (() => {
     const d = new Date();
     d.setHours(d.getHours() + 1);
     d.setMinutes(0);
-    return d.toISOString().slice(0, 16);  // formato datetime-local
+    return d.toISOString().slice(0, 16);
   })();
 
   const [form, setForm] = useState({
@@ -185,12 +270,25 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
     prioridad: "Media"
   });
 
-  // Calcular alertas automáticas (en vivo)
-  const autoAlerts = useMemo(() => {
-    return generateAutoAlerts(ingresos, gastos, tramos);
-  }, [ingresos, gastos, tramos]);
+  // Leer cuota actual para generar alerta de cuota autónomos
+  const cuotaActual = (() => {
+    try { return Number(localStorage.getItem("ga_cuota")) || 294; } catch { return 294; }
+  })();
 
-  // Procesar alertas manuales
+  // Automáticas (todas, sin filtrar descartadas — aquí mostramos el estado completo)
+  const autoAlertsAll = useMemo(() => {
+    return generateAutoAlerts(ingresos, gastos, tramos, cuotaActual);
+  }, [ingresos, gastos, tramos, cuotaActual]);
+
+  // Saber cuáles están descartadas para mostrarlas en gris
+  const autoAlertsConEstado = useMemo(() => {
+    return autoAlertsAll.map(a => ({
+      ...a,
+      dismissed: isAutoAlertDismissed(a.id, a.fingerprint)
+    }));
+  }, [autoAlertsAll]);
+
+  // Manuales ordenadas
   const manualAlerts = useMemo(() => {
     return alertas.map(airtableToAlert).sort((a, b) => {
       if (!a.fechaHora) return 1;
@@ -244,7 +342,7 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
     setDelId(null);
   };
 
-  const reactivar = async (id) => {
+  const reactivarManual = async (id) => {
     setDelId(id);
     try {
       await updateRecord("Alertas", id, { "Mostrada": false });
@@ -255,12 +353,68 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
     setDelId(null);
   };
 
+  const marcarLeidaManual = async (id) => {
+    setMarkingId(id);
+    try {
+      await updateRecord("Alertas", id, { "Mostrada": true });
+      await onRefresh();
+    } catch (e) {
+      alert("Error: " + e.message);
+    }
+    setMarkingId(null);
+  };
+
+  const marcarLeidaAuto = (alerta) => {
+    dismissAutoAlert(alerta.id, alerta.fingerprint);
+    // Como no hay llamada a Airtable, forzamos un refresh del estado local
+    onRefresh();
+  };
+
+  const reactivarAuto = (alerta) => {
+    const all = readDismissed();
+    delete all[alerta.id];
+    writeDismissed(all);
+    onRefresh();
+  };
+
+  const marcarTodasLeidas = async () => {
+    setMarkingAll(true);
+    try {
+      // Manuales pendientes con fecha pasada
+      const now = new Date();
+      const manualesPendientes = manualAlerts.filter(a =>
+        !a.mostrada && a.fechaHora && new Date(a.fechaHora) <= now
+      );
+      for (const a of manualesPendientes) {
+        await updateRecord("Alertas", a.id, { "Mostrada": true });
+      }
+
+      // Automáticas pendientes
+      const autoPendientes = autoAlertsConEstado.filter(a => !a.dismissed);
+      for (const a of autoPendientes) {
+        dismissAutoAlert(a.id, a.fingerprint);
+      }
+
+      await onRefresh();
+    } catch (e) {
+      alert("Error: " + e.message);
+    }
+    setMarkingAll(false);
+  };
+
+  // Contadores
+  const totalPendientes =
+    manualAlerts.filter(a => !a.mostrada && a.fechaHora && new Date(a.fechaHora) <= new Date()).length +
+    autoAlertsConEstado.filter(a => !a.dismissed).length;
+
   // ============================================================
   // RENDER ITEM
   // ============================================================
-  const renderItem = (a, isAuto) => {
+  const renderItem = (a, isAuto, isDismissed = false) => {
     const color = colorForPriority(a.prioridad);
     const emoji = emojiForType(a.tipo);
+    const leida = isAuto ? isDismissed : a.mostrada;
+    const isMarking = isAuto ? false : markingId === a.id;
 
     return (
       <div
@@ -272,7 +426,7 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
           padding: 18,
           border: `1px solid ${B.border}`,
           borderLeft: `4px solid ${color}`,
-          opacity: !isAuto && a.mostrada ? 0.55 : 1
+          opacity: leida ? 0.55 : 1
         }}
       >
         <div style={{
@@ -311,10 +465,10 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
                   </span>
                 </>
               )}
-              {!isAuto && a.mostrada && (
+              {leida && (
                 <>
                   <span style={{ color: B.muted }}>·</span>
-                  <span style={{ color: B.muted }}>VISTA</span>
+                  <span style={{ color: B.muted }}>LEÍDA</span>
                 </>
               )}
             </div>
@@ -350,22 +504,35 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
               </div>
             )}
           </div>
-          {!isAuto && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {a.mostrada && (
-                <button
-                  onClick={() => reactivar(a.id)}
-                  disabled={delId === a.id}
-                  style={{
-                    ...B.btnSm,
-                    background: "transparent",
-                    color: B.purple,
-                    border: `1px solid ${B.purple}`
-                  }}
-                >
-                  REACTIVAR
-                </button>
-              )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {!leida && (
+              <button
+                onClick={() => isAuto ? marcarLeidaAuto(a) : marcarLeidaManual(a.id)}
+                disabled={isMarking}
+                style={{
+                  ...B.btnSm,
+                  background: color,
+                  opacity: isMarking ? 0.5 : 1
+                }}
+              >
+                {isMarking ? "..." : "MARCAR LEÍDA"}
+              </button>
+            )}
+            {leida && (
+              <button
+                onClick={() => isAuto ? reactivarAuto(a) : reactivarManual(a.id)}
+                disabled={delId === a.id}
+                style={{
+                  ...B.btnSm,
+                  background: "transparent",
+                  color: B.purple,
+                  border: `1px solid ${B.purple}`
+                }}
+              >
+                REACTIVAR
+              </button>
+            )}
+            {!isAuto && (
               <button
                 onClick={() => borrar(a.id)}
                 disabled={delId === a.id}
@@ -373,8 +540,8 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
               >
                 BORRAR
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     );
@@ -385,13 +552,29 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
       <SectionHeader
         title="Alertas"
         action={
-          <button onClick={() => setShowAdd(!showAdd)} style={B.btn}>
-            {showAdd ? "CANCELAR" : "+ NUEVA ALERTA"}
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {totalPendientes > 1 && (
+              <button
+                onClick={marcarTodasLeidas}
+                disabled={markingAll}
+                style={{
+                  ...B.btnSm,
+                  background: "transparent",
+                  color: B.muted,
+                  border: `1px solid ${B.border}`,
+                  opacity: markingAll ? 0.5 : 1
+                }}
+              >
+                {markingAll ? "..." : `MARCAR TODAS (${totalPendientes})`}
+              </button>
+            )}
+            <button onClick={() => setShowAdd(!showAdd)} style={B.btn}>
+              {showAdd ? "CANCELAR" : "+ NUEVA ALERTA"}
+            </button>
+          </div>
         }
       />
 
-      {/* Formulario nueva alerta */}
       {showAdd && (
         <Card style={{ border: `2px solid ${B.purple}` }}>
           <Lbl>Programar Alerta Manual</Lbl>
@@ -458,7 +641,7 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
             Automáticas
           </div>
           <div style={{ fontSize: 22, fontWeight: 700, fontFamily: B.tM, color: B.purple }}>
-            {autoAlerts.length}
+            {autoAlertsConEstado.length}
           </div>
         </div>
         <div style={{
@@ -482,24 +665,29 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
             border: `1px solid ${B.border}`
           }}>
             <div style={{ fontSize: 11, color: B.muted, fontFamily: B.tM, textTransform: "uppercase" }}>
-              Sin ver
+              Pendientes
             </div>
-            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: B.tM, color: B.amber }}>
-              {manualAlerts.filter(a => !a.mostrada).length}
+            <div style={{
+              fontSize: 22,
+              fontWeight: 700,
+              fontFamily: B.tM,
+              color: totalPendientes > 0 ? B.amber : B.green
+            }}>
+              {totalPendientes}
             </div>
           </div>
         )}
       </div>
 
-      {/* Sección automáticas */}
-      {autoAlerts.length > 0 && (
+      {/* Automáticas */}
+      {autoAlertsConEstado.length > 0 && (
         <>
           <Lbl>Automáticas (calculadas en vivo)</Lbl>
-          {autoAlerts.map(a => renderItem(a, true))}
+          {autoAlertsConEstado.map(a => renderItem(a, true, a.dismissed))}
         </>
       )}
 
-      {/* Sección manuales */}
+      {/* Manuales */}
       {manualAlerts.length > 0 && (
         <>
           <Lbl>Programadas por ti</Lbl>
@@ -507,7 +695,7 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
         </>
       )}
 
-      {autoAlerts.length === 0 && manualAlerts.length === 0 && (
+      {autoAlertsConEstado.length === 0 && manualAlerts.length === 0 && (
         <Card>
           <p style={{ color: B.muted, fontFamily: B.tS, margin: 0 }}>
             No hay alertas activas. Todo está bajo control. 🎉
