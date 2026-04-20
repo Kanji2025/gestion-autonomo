@@ -44,7 +44,6 @@ async function callApi(endpoint, body, method = "POST") {
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    // Si el token caducó o es inválido, lo limpiamos
     if (res.status === 401) clearSessionToken();
     throw new Error(data.error || `Error ${res.status}`);
   }
@@ -95,19 +94,18 @@ export async function deleteRecord(table, recordId) {
   return data;
 }
 
-// Busca un cliente por nombre, lo crea si no existe, devuelve el ID
+// Busca un cliente por nombre, lo crea si no existe (Estatus: Activo), devuelve el ID
 export async function findOrCreateClient(nombre) {
   if (!nombre || !nombre.trim()) return null;
   const clean = nombre.trim();
-  // Escapamos comillas en el nombre para evitar romper la fórmula
   const safe = clean.replace(/"/g, '\\"');
   const formula = `{Nombre}="${safe}"`;
 
   const records = await fetchTable("Clientes", formula);
   if (records.length > 0) return records[0].id;
 
-  // Crear el cliente nuevo, marcado como Activo por defecto
-  const created = await createRecord("Clientes", { "Nombre": clean, "Activo": true });
+  // Crear nuevo cliente, marcado como Activo por defecto
+  const created = await createRecord("Clientes", { "Nombre": clean, "Estatus": "Activo" });
   if (created.records && created.records[0]) return created.records[0].id;
   return null;
 }
