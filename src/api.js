@@ -94,18 +94,39 @@ export async function deleteRecord(table, recordId) {
   return data;
 }
 
-// Busca un cliente por nombre, lo crea si no existe (Estatus: Activo), devuelve el ID
-export async function findOrCreateClient(nombre) {
+// ============================================================
+// FIND OR CREATE CLIENT
+// Busca un cliente por nombre y devuelve su ID.
+// - Si no existe, lo crea con Estatus=Activo y opcionalmente CIF.
+// - Si existe y recibimos un CIF nuevo, lo guarda (sin pisar si ya lo tenía).
+// ============================================================
+export async function findOrCreateClient(nombre, cif = null) {
   if (!nombre || !nombre.trim()) return null;
   const clean = nombre.trim();
   const safe = clean.replace(/"/g, '\\"');
   const formula = `{Nombre}="${safe}"`;
 
   const records = await fetchTable("Clientes", formula);
-  if (records.length > 0) return records[0].id;
 
-  // Crear nuevo cliente, marcado como Activo por defecto
-  const created = await createRecord("Clientes", { "Nombre": clean, "Estatus": "Activo" });
+  if (records.length > 0) {
+    const existing = records[0];
+    // Si viene CIF nuevo y el cliente existente no tiene uno, lo guardamos
+    if (cif && cif.trim() && !existing.fields["CIF/NIF"]) {
+      try {
+        await updateRecord("Clientes", existing.id, { "CIF/NIF": cif.trim() });
+      } catch (e) {
+        console.warn("No se pudo actualizar CIF del cliente existente:", e);
+        // No bloqueamos el flujo por esto
+      }
+    }
+    return existing.id;
+  }
+
+  // Cliente nuevo: lo creamos con Estatus=Activo y CIF si vino
+  const fields = { "Nombre": clean, "Estatus": "Activo" };
+  if (cif && cif.trim()) fields["CIF/NIF"] = cif.trim();
+
+  const created = await createRecord("Clientes", fields);
   if (created.records && created.records[0]) return created.records[0].id;
   return null;
 }
