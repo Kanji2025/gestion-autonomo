@@ -62,7 +62,7 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
         "Concepto": form.concepto,
         "Fecha": form.fecha,
         "Base Imponible": Number(form.base) || 0,
-        "IVA Soportado (€)": form.iva ? Number(form.iva) : Number(form.base) * 0.21
+        "IVA Soportado (€)": form.iva && form.iva !== "" ? Number(form.iva) : 0
       };
       if (form.irpf) f["IRPF Retenido (€)"] = Number(form.irpf);
       if (form.tipo) f["Tipo de Gasto"] = form.tipo;
