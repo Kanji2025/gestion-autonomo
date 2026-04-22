@@ -1,14 +1,116 @@
 // src/components/Gastos.jsx
-// Sección de Gastos: alta manual + OCR/IA + edición inline + borrado.
-// IVA Soportado por defecto = 0 (correcto fiscalmente).
+// Sección de Gastos: alta manual (con toggle de gasto fijo) + OCR/IA + edición + duplicado + borrado.
+// Menú de 3 puntos (⋮) con Editar/Duplicar/Borrar.
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { B, fmt, hoy, applyF } from "../utils.js";
 import { useResponsive } from "../hooks/useResponsive.js";
-import { createRecord, updateRecord, deleteRecord } from "../api.js";
+import {
+  createRecord,
+  updateRecord,
+  deleteRecord,
+  findGastoFijoByProveedor,
+  createGastoFijo,
+  linkGastoToGastoFijo
+} from "../api.js";
 import { Card, Lbl, Inp, Sel, SectionHeader, FilterBar, ErrorBox } from "./UI.jsx";
 import NuevoForm from "./NuevoForm.jsx";
 
+// ============================================================
+// MENÚ DE 3 PUNTOS
+// ============================================================
+function DotMenu({ onEdit, onDuplicate, onDelete, disabled }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    if (open) {
+      document.addEventListener("mousedown", handler);
+      return () => document.removeEventListener("mousedown", handler);
+    }
+  }, [open]);
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
+        disabled={disabled}
+        style={{
+          background: "transparent",
+          border: `1px solid ${B.border}`,
+          borderRadius: 4,
+          padding: "4px 10px",
+          cursor: disabled ? "not-allowed" : "pointer",
+          fontSize: 14,
+          fontWeight: 700,
+          color: B.muted,
+          opacity: disabled ? 0.5 : 1,
+          lineHeight: 1
+        }}
+        aria-label="Opciones"
+      >
+        ⋮
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute",
+          right: 0,
+          top: "calc(100% + 4px)",
+          background: "#fff",
+          border: `1px solid ${B.border}`,
+          borderRadius: 6,
+          boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+          minWidth: 140,
+          zIndex: 50,
+          overflow: "hidden"
+        }}>
+          <button
+            onClick={() => { setOpen(false); onEdit(); }}
+            style={menuItemStyle(B.text)}
+          >
+            ✏️ Editar
+          </button>
+          <button
+            onClick={() => { setOpen(false); onDuplicate(); }}
+            style={menuItemStyle(B.purple)}
+          >
+            📋 Duplicar
+          </button>
+          <button
+            onClick={() => { setOpen(false); onDelete(); }}
+            style={menuItemStyle(B.red)}
+          >
+            🗑 Borrar
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function menuItemStyle(color) {
+  return {
+    display: "block",
+    width: "100%",
+    padding: "10px 14px",
+    textAlign: "left",
+    background: "transparent",
+    border: "none",
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: 600,
+    fontFamily: B.tS,
+    color,
+    transition: "background 0.1s ease"
+  };
+}
+
+// ============================================================
+// COMPONENTE PRINCIPAL
+// ============================================================
 export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
   const { isMobile, formColumns } = useResponsive();
 
@@ -21,9 +123,14 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
   const [savingEdit, setSavingEdit] = useState(false);
   const [err, setErr] = useState("");
 
+  // Estado formulario manual (alta)
   const [form, setForm] = useState({
-    concepto: "", fecha: hoy(), base: "", iva: "", irpf: "", tipo: "", period: ""
+    concepto: "", proveedor: "", fecha: hoy(), base: "", iva: "", irpf: "",
+    tipo: "", period: "", esFijo: false, periodFijo: "Mensual", monedaFijo: "EUR"
   });
+
+  // Modal de duplicado (para gasto fijo repetido)
+  const [duplicadoModal, setDuplicadoModal] = useState(null);
 
   const fg = applyF(gastos, filtro);
   const fijos = fg.filter(r => ["Mensual", "Anual", "Trimestral"].includes(r.fields["Periodicidad"]));
@@ -35,11 +142,15 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
   }, 0);
 
   // ============================================================
-  // ALTA MANUAL RÁPIDA
+  // GUARDAR MANUAL (con lógica de gasto fijo)
   // ============================================================
   const save = async () => {
     if (!form.concepto || !form.base) {
       setErr("Concepto y base son obligatorios");
+      return;
+    }
+    if (form.esFijo && !form.proveedor.trim()) {
+      setErr("Para dar de alta un gasto fijo necesitas rellenar el proveedor");
       return;
     }
     setErr("");
@@ -55,8 +166,45 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
       if (form.tipo) f["Tipo de Gasto"] = form.tipo;
       if (form.period) f["Periodicidad"] = form.period;
 
-      await createRecord("Gastos", f);
-      setForm({ concepto: "", fecha: hoy(), base: "", iva: "", irpf: "", tipo: "", period: "" });
+      const created = await createRecord("Gastos", f);
+      const nuevoGastoId = created.records?.[0]?.id;
+
+      // Si es gasto fijo, gestionar alta/duplicado
+      if (form.esFijo && form.proveedor.trim()) {
+        const existente = await findGastoFijoByProveedor(form.proveedor.trim());
+
+        if (existente) {
+          setDuplicadoModal({
+            existente,
+            nuevoGastoId,
+            proveedor: form.proveedor.trim()
+          });
+          setSav(false);
+          return; // espera decisión del usuario en el modal
+        }
+
+        try {
+          const nuevoFijoId = await createGastoFijo({
+            nombre: form.proveedor.trim(),
+            proveedor: form.proveedor.trim(),
+            periodicidad: form.periodFijo,
+            importe: Number(form.base) + (Number(form.iva) || 0),
+            moneda: form.monedaFijo,
+            fechaAlta: form.fecha || hoy()
+          });
+          if (nuevoFijoId && nuevoGastoId) {
+            await linkGastoToGastoFijo(nuevoGastoId, nuevoFijoId);
+          }
+        } catch (e) {
+          console.warn("Gasto guardado pero no se pudo crear el Gasto Fijo:", e);
+        }
+      }
+
+      // Éxito (sin modal)
+      setForm({
+        concepto: "", proveedor: "", fecha: hoy(), base: "", iva: "", irpf: "",
+        tipo: "", period: "", esFijo: false, periodFijo: "Mensual", monedaFijo: "EUR"
+      });
       setShowFManual(false);
       onRefresh();
     } catch (e) {
@@ -65,6 +213,58 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
     setSav(false);
   };
 
+  // ============================================================
+  // ACCIONES DEL MODAL DE DUPLICADO
+  // ============================================================
+  const enlazarAExistente = async () => {
+    const { existente, nuevoGastoId } = duplicadoModal;
+    try {
+      if (nuevoGastoId && existente?.id) {
+        await linkGastoToGastoFijo(nuevoGastoId, existente.id);
+      }
+      cerrarModal();
+    } catch (e) {
+      alert("Error al enlazar: " + e.message);
+    }
+  };
+
+  const crearDuplicado = async () => {
+    const { nuevoGastoId } = duplicadoModal;
+    try {
+      const nuevoFijoId = await createGastoFijo({
+        nombre: form.proveedor.trim() + " (2)",
+        proveedor: form.proveedor.trim(),
+        periodicidad: form.periodFijo,
+        importe: Number(form.base) + (Number(form.iva) || 0),
+        moneda: form.monedaFijo,
+        fechaAlta: form.fecha || hoy()
+      });
+      if (nuevoFijoId && nuevoGastoId) {
+        await linkGastoToGastoFijo(nuevoGastoId, nuevoFijoId);
+      }
+      cerrarModal();
+    } catch (e) {
+      alert("Error al crear: " + e.message);
+    }
+  };
+
+  const cancelarGastoFijo = () => {
+    cerrarModal();
+  };
+
+  const cerrarModal = () => {
+    setDuplicadoModal(null);
+    setForm({
+      concepto: "", proveedor: "", fecha: hoy(), base: "", iva: "", irpf: "",
+      tipo: "", period: "", esFijo: false, periodFijo: "Mensual", monedaFijo: "EUR"
+    });
+    setShowFManual(false);
+    onRefresh();
+  };
+
+  // ============================================================
+  // BORRAR
+  // ============================================================
   const del = async (id) => {
     if (!confirm("¿Borrar este gasto?")) return;
     setDelId(id);
@@ -75,6 +275,43 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
       alert("Error al borrar: " + e.message);
     }
     setDelId(null);
+  };
+
+  // ============================================================
+  // DUPLICAR
+  // ============================================================
+  const duplicar = async (g) => {
+    try {
+      const copia = {
+        "Concepto": g.fields["Concepto"] || "Gasto",
+        "Fecha": hoy(),
+        "Base Imponible": g.fields["Base Imponible"] || 0,
+        "IVA Soportado (€)": g.fields["IVA Soportado (€)"] || 0
+      };
+      if (g.fields["IRPF Retenido (€)"]) copia["IRPF Retenido (€)"] = g.fields["IRPF Retenido (€)"];
+      if (g.fields["Tipo de Gasto"]) copia["Tipo de Gasto"] = g.fields["Tipo de Gasto"];
+      if (g.fields["Periodicidad"]) copia["Periodicidad"] = g.fields["Periodicidad"];
+
+      const created = await createRecord("Gastos", copia);
+      await onRefresh();
+
+      // Abrir el editor en la copia recién creada
+      const nuevoId = created.records?.[0]?.id;
+      if (nuevoId) {
+        setEditId(nuevoId);
+        setEditForm({
+          concepto: copia["Concepto"],
+          fecha: copia["Fecha"],
+          base: String(copia["Base Imponible"]),
+          iva: String(copia["IVA Soportado (€)"]),
+          irpf: String(copia["IRPF Retenido (€)"] || ""),
+          tipo: copia["Tipo de Gasto"] || "",
+          period: copia["Periodicidad"] || ""
+        });
+      }
+    } catch (e) {
+      alert("Error al duplicar: " + e.message);
+    }
   };
 
   // ============================================================
@@ -138,7 +375,6 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
     );
   }
 
-  // Form de edición (se renderiza para el gasto que se está editando)
   const renderEditForm = () => (
     <Card style={{ border: `2px solid ${B.purple}`, marginTop: 8, marginBottom: 8 }}>
       <Lbl><span style={{ color: B.purple }}>EDITAR GASTO</span></Lbl>
@@ -173,7 +409,6 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
     </Card>
   );
 
-  // Renderiza un gasto individual (con o sin formulario de edición)
   const renderGasto = (g, showPeriod = false) => {
     const isEditing = editId === g.id;
     const base = g.fields["Base Imponible"] || 0;
@@ -181,6 +416,8 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
     const irpf = g.fields["IRPF Retenido (€)"] || 0;
     const fecha = g.fields["Fecha"] || "";
     const periodo = g.fields["Periodicidad"] || "";
+    const gastoFijoIds = g.fields["Gasto Fijo"] || [];
+    const esFijo = gastoFijoIds.length > 0;
 
     if (isEditing) return <div key={g.id}>{renderEditForm()}</div>;
 
@@ -199,7 +436,8 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
           flexWrap: "wrap"
         }}>
           <div style={{ flex: 1, minWidth: 180 }}>
-            <div style={{ fontWeight: 600, fontSize: 14, fontFamily: B.tS }}>
+            <div style={{ fontWeight: 600, fontSize: 14, fontFamily: B.tS, display: "flex", alignItems: "center", gap: 6 }}>
+              {esFijo && <span title="Gasto fijo recurrente">🔄</span>}
               {g.fields["Concepto"] || "Sin concepto"}
             </div>
             <div style={{ fontSize: 12, color: B.muted, marginTop: 2, fontFamily: B.tM }}>
@@ -225,28 +463,12 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
                 {fmt(periodo === "Mensual" ? base : periodo === "Trimestral" ? base / 3 : periodo === "Anual" ? base / 12 : base)}/mes
               </div>
             )}
-            <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-              <button
-                onClick={() => startEdit(g)}
-                style={{
-                  ...B.btnSm,
-                  background: "transparent",
-                  color: B.purple,
-                  border: `1px solid ${B.purple}`,
-                  padding: "4px 10px",
-                  fontSize: 10
-                }}
-              >
-                EDITAR
-              </button>
-              <button
-                onClick={() => del(g.id)}
-                disabled={delId === g.id}
-                style={{ ...B.btnDel, padding: "4px 10px", fontSize: 10, opacity: delId === g.id ? 0.5 : 1 }}
-              >
-                BORRAR
-              </button>
-            </div>
+            <DotMenu
+              onEdit={() => startEdit(g)}
+              onDuplicate={() => duplicar(g)}
+              onDelete={() => del(g.id)}
+              disabled={delId === g.id}
+            />
           </div>
         </div>
       </div>
@@ -285,7 +507,8 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
             gap: 14,
             marginTop: 14
           }}>
-            <Inp label="Concepto" value={form.concepto} onChange={v => setForm({ ...form, concepto: v })} ph="Ej: Adobe" />
+            <Inp label="Concepto" value={form.concepto} onChange={v => setForm({ ...form, concepto: v })} ph="Ej: Cuota SS" />
+            <Inp label="Proveedor" value={form.proveedor} onChange={v => setForm({ ...form, proveedor: v })} ph="Ej: TGSS" />
             <Inp label="Fecha" value={form.fecha} onChange={v => setForm({ ...form, fecha: v })} type="date" />
             <Inp label="Base Imponible (€)" value={form.base} onChange={v => setForm({ ...form, base: v })} type="number" ph="0" />
             <Inp label="IVA Soportado (€)" value={form.iva} onChange={v => setForm({ ...form, iva: v })} type="number" ph="0 si no lleva IVA" />
@@ -293,7 +516,89 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
             <Sel label="Tipo de Gasto" value={form.tipo} onChange={v => setForm({ ...form, tipo: v })} options={["Fijo", "Variable", "Impuesto"]} />
             <Sel label="Periodicidad" value={form.period} onChange={v => setForm({ ...form, period: v })} options={["Mensual", "Trimestral", "Anual", "Puntual"]} />
           </div>
-          <button onClick={save} disabled={sav} style={{ ...B.btn, width: "100%", marginTop: 16, opacity: sav ? 0.5 : 1 }}>
+
+          {/* TOGGLE "¿Es un gasto fijo recurrente?" */}
+          <div style={{
+            marginTop: 18,
+            padding: 14,
+            background: form.esFijo ? B.purple + "10" : "rgba(0,0,0,0.03)",
+            border: `2px solid ${form.esFijo ? B.purple : B.border}`,
+            borderRadius: 10,
+            transition: "all 0.2s ease"
+          }}>
+            <label style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              cursor: "pointer",
+              userSelect: "none"
+            }}>
+              <input
+                type="checkbox"
+                checked={form.esFijo}
+                onChange={e => setForm({ ...form, esFijo: e.target.checked })}
+                style={{
+                  width: 20,
+                  height: 20,
+                  accentColor: B.purple,
+                  cursor: "pointer"
+                }}
+              />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, fontFamily: B.tS }}>
+                  🔄 ¿Es un gasto fijo recurrente?
+                </div>
+                <div style={{ fontSize: 12, color: B.muted, marginTop: 2 }}>
+                  Marca si es una suscripción o pago periódico (cuota SS, seguro, etc.)
+                </div>
+              </div>
+            </label>
+
+            {form.esFijo && (
+              <div style={{
+                marginTop: 14,
+                display: "grid",
+                gridTemplateColumns: `repeat(${Math.min(formColumns, 2)}, 1fr)`,
+                gap: 12,
+                paddingTop: 14,
+                borderTop: `1px solid ${B.border}`
+              }}>
+                <Sel
+                  label="Periodicidad del Fijo"
+                  value={form.periodFijo}
+                  onChange={v => setForm({ ...form, periodFijo: v })}
+                  options={["Mensual", "Trimestral", "Anual"]}
+                />
+                <Sel
+                  label="Moneda"
+                  value={form.monedaFijo}
+                  onChange={v => setForm({ ...form, monedaFijo: v })}
+                  options={["EUR", "USD", "GBP"]}
+                />
+                {!form.proveedor && (
+                  <div style={{
+                    gridColumn: "1 / -1",
+                    padding: "8px 12px",
+                    background: B.amber + "15",
+                    color: B.amber,
+                    borderRadius: 6,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    fontFamily: B.tS
+                  }}>
+                    ⚠️ Rellena el campo "Proveedor" arriba para identificar el gasto fijo
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <button onClick={save} disabled={sav || (form.esFijo && !form.proveedor.trim())} style={{
+            ...B.btn,
+            width: "100%",
+            marginTop: 16,
+            opacity: (sav || (form.esFijo && !form.proveedor.trim())) ? 0.5 : 1
+          }}>
             {sav ? "GUARDANDO..." : "GUARDAR GASTO"}
           </button>
         </Card>
@@ -310,7 +615,6 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
         </div>
       </div>
 
-      {/* Lista de gastos fijos */}
       {fijos.length > 0 && (
         <Card>
           <Lbl>Gastos Fijos ({fijos.length})</Lbl>
@@ -320,7 +624,6 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
         </Card>
       )}
 
-      {/* Lista de gastos variables */}
       {vars.length > 0 && (
         <Card>
           <Lbl>Gastos Variables ({vars.length})</Lbl>
@@ -336,6 +639,81 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
             No hay gastos en el período seleccionado.
           </p>
         </Card>
+      )}
+
+      {/* MODAL DE DUPLICADO (Gasto Fijo ya existe) */}
+      {duplicadoModal && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "rgba(0,0,0,0.55)",
+          backdropFilter: "blur(3px)",
+          zIndex: 300,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 16
+        }}>
+          <div style={{
+            background: "#fff",
+            borderRadius: 12,
+            padding: 24,
+            maxWidth: 480,
+            width: "100%",
+            boxShadow: "0 20px 60px rgba(0,0,0,0.3)"
+          }}>
+            <div style={{ fontSize: 32, marginBottom: 10 }}>⚠️</div>
+            <div style={{
+              fontSize: 16,
+              fontWeight: 700,
+              fontFamily: B.tS,
+              marginBottom: 10
+            }}>
+              Ya existe un gasto fijo para «{duplicadoModal.proveedor}»
+            </div>
+            <div style={{
+              fontSize: 13,
+              color: B.muted,
+              marginBottom: 20,
+              lineHeight: 1.5
+            }}>
+              Tienes registrado un Gasto Fijo con este proveedor
+              ({duplicadoModal.existente.fields["Activa"] === "Sí" ? "activo" : "dado de baja"}).
+              El gasto ya se ha guardado correctamente. ¿Qué quieres hacer con la parte del Gasto Fijo?
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <button onClick={enlazarAExistente} style={{
+                ...B.btn,
+                background: B.green,
+                width: "100%"
+              }}>
+                ✅ ENLAZAR AL GASTO FIJO EXISTENTE
+              </button>
+              <button onClick={crearDuplicado} style={{
+                ...B.btn,
+                background: "transparent",
+                color: B.purple,
+                border: `2px solid ${B.purple}`,
+                width: "100%"
+              }}>
+                ➕ CREAR UNO NUEVO (duplicado)
+              </button>
+              <button onClick={cancelarGastoFijo} style={{
+                ...B.btn,
+                background: "transparent",
+                color: B.muted,
+                border: `1px solid ${B.border}`,
+                width: "100%"
+              }}>
+                NO ENLAZAR A NINGUNO
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
