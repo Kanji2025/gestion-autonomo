@@ -289,7 +289,7 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
         const f = {
           "Concepto": concepto || desc || proveedor || "Gasto",
           "Base Imponible": Number(base) || 0,
-          "IVA Soportado (€)": Number(iva) || (Number(base) * 0.21) || 0
+         "IVA Soportado (€)": iva && iva.trim() !== "" ? Number(iva) : 0
         };
         if (irpfG) f["IRPF Retenido (€)"] = Number(irpfG);
         if (fecha) f["Fecha"] = fecha;
