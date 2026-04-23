@@ -1,13 +1,109 @@
 // src/components/Facturas.jsx
-// Sección de Facturas (Ingresos): listado + buscador + edición inline + borrado.
+// Sección de Facturas (Ingresos): listado + buscador + edición + duplicado + borrado.
+// Menú de 3 puntos (⋮) con Editar/Duplicar/Borrar.
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { B, fmt, hoy, applyF } from "../utils.js";
 import { useResponsive } from "../hooks/useResponsive.js";
-import { updateRecord, deleteRecord } from "../api.js";
+import { createRecord, updateRecord, deleteRecord } from "../api.js";
 import { Card, Lbl, Inp, Sel, Sem, SectionHeader, FilterBar } from "./UI.jsx";
 import NuevoForm from "./NuevoForm.jsx";
 
+// ============================================================
+// MENÚ DE 3 PUNTOS
+// ============================================================
+function DotMenu({ onEdit, onDuplicate, onDelete, disabled }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    if (open) {
+      document.addEventListener("mousedown", handler);
+      return () => document.removeEventListener("mousedown", handler);
+    }
+  }, [open]);
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
+        disabled={disabled}
+        style={{
+          background: "transparent",
+          border: `1px solid ${B.border}`,
+          borderRadius: 4,
+          padding: "4px 10px",
+          cursor: disabled ? "not-allowed" : "pointer",
+          fontSize: 14,
+          fontWeight: 700,
+          color: B.muted,
+          opacity: disabled ? 0.5 : 1,
+          lineHeight: 1
+        }}
+        aria-label="Opciones"
+      >
+        ⋮
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute",
+          right: 0,
+          top: "calc(100% + 4px)",
+          background: "#fff",
+          border: `1px solid ${B.border}`,
+          borderRadius: 6,
+          boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+          minWidth: 140,
+          zIndex: 50,
+          overflow: "hidden"
+        }}>
+          <button
+            onClick={() => { setOpen(false); onEdit(); }}
+            style={menuItemStyle(B.text)}
+          >
+            ✏️ Editar
+          </button>
+          <button
+            onClick={() => { setOpen(false); onDuplicate(); }}
+            style={menuItemStyle(B.purple)}
+          >
+            📋 Duplicar
+          </button>
+          <button
+            onClick={() => { setOpen(false); onDelete(); }}
+            style={menuItemStyle(B.red)}
+          >
+            🗑 Borrar
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function menuItemStyle(color) {
+  return {
+    display: "block",
+    width: "100%",
+    padding: "10px 14px",
+    textAlign: "left",
+    background: "transparent",
+    border: "none",
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: 600,
+    fontFamily: B.tS,
+    color,
+    transition: "background 0.1s ease"
+  };
+}
+
+// ============================================================
+// COMPONENTE PRINCIPAL
+// ============================================================
 export default function FacturasView({ ingresos, clientes, onRefresh, filtro, setFiltro }) {
   const { isMobile, formColumns } = useResponsive();
 
@@ -23,7 +119,6 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
   // ============================================================
   const fi = applyF(ingresos, filtro);
 
-  // Mapa para resolver clienteId → nombre
   const clienteMap = {};
   clientes.forEach(c => {
     clienteMap[c.id] = c.fields["Nombre"] || "Sin nombre";
@@ -32,16 +127,21 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
   const facturasProcesadas = fi.map(f => {
     const clienteIds = f.fields["Cliente"] || [];
     const clienteNombre = clienteIds.length > 0 ? (clienteMap[clienteIds[0]] || "Cliente eliminado") : "Sin cliente";
+    const base = f.fields["Base Imponible"] || 0;
+    const iva = f.fields["IVA (€)"] || 0;
+    const irpf = f.fields["IRPF (€)"] || 0;
     return {
       id: f.id,
       raw: f,
       numero: f.fields["Nº Factura"] || "-",
       fecha: f.fields["Fecha"] || "",
+      clienteId: clienteIds[0] || null,
       cliente: clienteNombre,
-      base: f.fields["Base Imponible"] || 0,
-      iva: f.fields["IVA (€)"] || 0,
-      irpf: f.fields["IRPF (€)"] || 0,
-      total: (f.fields["Base Imponible"] || 0) + (f.fields["IVA (€)"] || 0) - (f.fields["IRPF (€)"] || 0),
+      base,
+      iva,
+      irpf,
+      totalConIva: base + iva,
+      neto: base - irpf,
       estado: f.fields["Estado"] || "Pendiente",
       fechaVenc: f.fields["Fecha Vencimiento"] || "",
       fechaCobro: f.fields["Fecha Cobro"] || ""
@@ -94,15 +194,12 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
       if (editForm.fecha) fields["Fecha"] = editForm.fecha;
       if (editForm.fechaVenc) fields["Fecha Vencimiento"] = editForm.fechaVenc;
 
-      // Si marca Cobrada y no hay fecha de cobro, ponemos hoy
       if (editForm.estado === "Cobrada" && !editForm.fechaCobro) {
         fields["Fecha Cobro"] = hoy();
       } else if (editForm.fechaCobro) {
         fields["Fecha Cobro"] = editForm.fechaCobro;
       }
 
-      // IVA e IRPF: solo si los campos NO son fórmula en Airtable
-      // (lo enviamos por si acaso; si Airtable lo ignora porque es fórmula, no pasa nada)
       if (editForm.iva !== "") fields["IVA (€)"] = Number(editForm.iva);
       if (editForm.irpf !== "") fields["IRPF (€)"] = Number(editForm.irpf);
 
@@ -131,7 +228,46 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
   };
 
   // ============================================================
-  // CAMBIO DE ESTADO RÁPIDO (sin abrir editor)
+  // DUPLICAR
+  // ============================================================
+  const duplicar = async (f) => {
+    try {
+      const copia = {
+        "Nº Factura": "",
+        "Fecha": hoy(),
+        "Base Imponible": f.base || 0,
+        "Estado": "Pendiente"
+      };
+      if (f.clienteId) copia["Cliente"] = [f.clienteId];
+      // IVA e IRPF se enviarán, y si son fórmula en Airtable se ignorarán
+      if (f.iva) copia["IVA (€)"] = f.iva;
+      if (f.irpf) copia["IRPF (€)"] = f.irpf;
+
+      const created = await createRecord("Ingresos", copia);
+      await onRefresh();
+
+      // Abrir el editor en la copia recién creada
+      const nuevoId = created.records?.[0]?.id;
+      if (nuevoId) {
+        setEditId(nuevoId);
+        setEditForm({
+          numero: "",
+          fecha: copia["Fecha"],
+          base: String(copia["Base Imponible"]),
+          iva: String(f.iva || ""),
+          irpf: String(f.irpf || ""),
+          estado: "Pendiente",
+          fechaVenc: "",
+          fechaCobro: ""
+        });
+      }
+    } catch (e) {
+      alert("Error al duplicar: " + e.message);
+    }
+  };
+
+  // ============================================================
+  // CAMBIO DE ESTADO RÁPIDO
   // ============================================================
   const cambiarEstado = async (id, nuevoEstado) => {
     try {
@@ -145,7 +281,7 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
   };
 
   // ============================================================
-  // RENDER DEL FORMULARIO DE NUEVA FACTURA
+  // NUEVA FACTURA (OCR)
   // ============================================================
   if (showNueva) {
     return (
@@ -159,7 +295,7 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
   }
 
   // ============================================================
-  // RENDER DEL EDITOR INLINE
+  // EDITOR INLINE
   // ============================================================
   const renderEditForm = () => (
     <Card style={{ border: `2px solid ${B.purple}`, marginTop: 8, marginBottom: 8 }}>
@@ -189,7 +325,7 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
         color: B.muted,
         fontFamily: B.tS
       }}>
-        ℹ️ Si los campos IVA/IRPF en tu Airtable son fórmulas automáticas, los valores que escribas aquí se ignorarán. Para editarlos, hazlos manuales en Airtable.
+        ℹ️ Si los campos IVA/IRPF en tu Airtable son fórmulas automáticas, los valores que escribas aquí se ignorarán.
       </div>
 
       <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
@@ -210,7 +346,7 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
   );
 
   // ============================================================
-  // RENDER DE UNA FACTURA INDIVIDUAL
+  // RENDER DE UNA FACTURA
   // ============================================================
   const renderFactura = (f) => {
     if (editId === f.id) return <div key={f.id}>{renderEditForm()}</div>;
@@ -253,7 +389,10 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
 
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
             <div style={{ fontWeight: 700, fontFamily: B.tM, fontSize: 16 }}>
-              {fmt(f.total)}
+              {fmt(f.totalConIva)}
+            </div>
+            <div style={{ fontSize: 11, color: B.green, fontWeight: 600 }}>
+              Neto: {fmt(f.neto)}
             </div>
             <select
               value={f.estado}
@@ -272,28 +411,12 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
               <option value="Cobrada">Cobrada</option>
               <option value="Vencida">Vencida</option>
             </select>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button
-                onClick={() => startEdit(f)}
-                style={{
-                  ...B.btnSm,
-                  background: "transparent",
-                  color: B.purple,
-                  border: `1px solid ${B.purple}`,
-                  padding: "4px 10px",
-                  fontSize: 10
-                }}
-              >
-                EDITAR
-              </button>
-              <button
-                onClick={() => del(f.id)}
-                disabled={delId === f.id}
-                style={{ ...B.btnDel, padding: "4px 10px", fontSize: 10, opacity: delId === f.id ? 0.5 : 1 }}
-              >
-                BORRAR
-              </button>
-            </div>
+            <DotMenu
+              onEdit={() => startEdit(f)}
+              onDuplicate={() => duplicar(f)}
+              onDelete={() => del(f.id)}
+              disabled={delId === f.id}
+            />
           </div>
         </div>
       </div>
@@ -301,12 +424,12 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
   };
 
   // ============================================================
-  // CÁLCULOS DE RESUMEN
+  // KPIs (totales del listado filtrado)
   // ============================================================
   const totalBase = facturasProcesadas.reduce((s, f) => s + f.base, 0);
+  const totalNeto = facturasProcesadas.reduce((s, f) => s + f.neto, 0);
   const totalCobradas = facturasProcesadas.filter(f => f.estado === "Cobrada").reduce((s, f) => s + f.base, 0);
-  const totalPendientes = facturasProcesadas.filter(f => f.estado === "Pendiente").reduce((s, f) => s + f.base, 0);
-  const totalVencidas = facturasProcesadas.filter(f => f.estado === "Vencida").reduce((s, f) => s + f.base, 0);
+  const totalPendientes = facturasProcesadas.filter(f => f.estado === "Pendiente" || f.estado === "Vencida").reduce((s, f) => s + f.base, 0);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
@@ -321,7 +444,6 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
 
       <FilterBar filtro={filtro} setFiltro={setFiltro} />
 
-      {/* Buscador */}
       <input
         type="text"
         placeholder="Buscar por nº factura o cliente..."
@@ -335,15 +457,19 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
         }}
       />
 
-      {/* KPIs rápidos */}
+      {/* KPIs */}
       <div style={{
         display: "grid",
         gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)",
         gap: 10
       }}>
         <div style={{ background: B.card, padding: "12px 14px", borderRadius: 8, border: `1px solid ${B.border}` }}>
-          <div style={{ fontSize: 10, color: B.muted, fontFamily: B.tM, textTransform: "uppercase" }}>Total</div>
+          <div style={{ fontSize: 10, color: B.muted, fontFamily: B.tM, textTransform: "uppercase" }}>Base Total</div>
           <div style={{ fontSize: 18, fontWeight: 700, fontFamily: B.tM, color: B.purple }}>{fmt(totalBase)}</div>
+        </div>
+        <div style={{ background: B.card, padding: "12px 14px", borderRadius: 8, border: `1px solid ${B.border}` }}>
+          <div style={{ fontSize: 10, color: B.muted, fontFamily: B.tM, textTransform: "uppercase" }}>Neto (sin IRPF)</div>
+          <div style={{ fontSize: 18, fontWeight: 700, fontFamily: B.tM, color: B.green }}>{fmt(totalNeto)}</div>
         </div>
         <div style={{ background: B.card, padding: "12px 14px", borderRadius: 8, border: `1px solid ${B.border}` }}>
           <div style={{ fontSize: 10, color: B.muted, fontFamily: B.tM, textTransform: "uppercase" }}>Cobrado</div>
@@ -352,10 +478,6 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
         <div style={{ background: B.card, padding: "12px 14px", borderRadius: 8, border: `1px solid ${B.border}` }}>
           <div style={{ fontSize: 10, color: B.muted, fontFamily: B.tM, textTransform: "uppercase" }}>Pendiente</div>
           <div style={{ fontSize: 18, fontWeight: 700, fontFamily: B.tM, color: B.amber }}>{fmt(totalPendientes)}</div>
-        </div>
-        <div style={{ background: B.card, padding: "12px 14px", borderRadius: 8, border: `1px solid ${B.border}` }}>
-          <div style={{ fontSize: 10, color: B.muted, fontFamily: B.tM, textTransform: "uppercase" }}>Vencido</div>
-          <div style={{ fontSize: 18, fontWeight: 700, fontFamily: B.tM, color: B.red }}>{fmt(totalVencidas)}</div>
         </div>
       </div>
 
