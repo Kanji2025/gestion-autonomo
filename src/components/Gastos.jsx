@@ -121,6 +121,7 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
   const [editId, setEditId] = useState(null);
   const [editForm, setEditForm] = useState(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [forcedEditVisible, setForcedEditVisible] = useState(false);
   const [err, setErr] = useState("");
 
   // Estado formulario manual (alta)
