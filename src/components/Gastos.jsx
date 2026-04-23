@@ -296,21 +296,26 @@ const duplicar = async (g) => {
       const created = await createRecord("Gastos", copia);
       const nuevoId = created.records?.[0]?.id;
 
-      // Abrir el editor ANTES del refresh, para que al actualizarse la lista ya esté listo
-      if (nuevoId) {
-        setEditId(nuevoId);
-        setEditForm({
-          concepto: copia["Concepto"],
-          fecha: copia["Fecha"],
-          base: String(copia["Base Imponible"]),
-          iva: String(copia["IVA Soportado (€)"]),
-          irpf: String(copia["IRPF Retenido (€)"] || ""),
-          tipo: copia["Tipo de Gasto"] || "",
-          period: copia["Periodicidad"] || ""
-        });
+      if (!nuevoId) {
+        alert("No se pudo crear la copia");
+        return;
       }
 
-      await onRefresh();
+      // Mostrar el editor inmediatamente con los datos en memoria
+      setEditId(nuevoId);
+      setEditForm({
+        concepto: copia["Concepto"],
+        fecha: copia["Fecha"],
+        base: String(copia["Base Imponible"]),
+        iva: String(copia["IVA Soportado (€)"]),
+        irpf: String(copia["IRPF Retenido (€)"] || ""),
+        tipo: copia["Tipo de Gasto"] || "",
+        period: copia["Periodicidad"] || ""
+      });
+      setForcedEditVisible(true);
+
+      // Refresh en segundo plano (no bloqueante)
+      onRefresh();
     } catch (e) {
       alert("Error al duplicar: " + e.message);
     }
@@ -335,9 +340,10 @@ const duplicar = async (g) => {
   const cancelEdit = () => {
     setEditId(null);
     setEditForm(null);
+    setForcedEditVisible(false);
   };
 
-  const saveEdit = async () => {
+const saveEdit = async () => {
     if (!editForm.concepto || !editForm.base) {
       alert("Concepto y base son obligatorios");
       return;
@@ -616,7 +622,10 @@ const duplicar = async (g) => {
           Suma prorrateada de tus gastos fijos (mensual + trimestral/3 + anual/12)
         </div>
       </div>
-
+{/* Editor virtual cuando duplicamos (el gasto aún no está en la lista) */}
+      {forcedEditVisible && editId && editForm && !fg.some(g => g.id === editId) && (
+        <div>{renderEditForm()}</div>
+      )}
       {fijos.length > 0 && (
         <Card>
           <Lbl>Gastos Fijos ({fijos.length})</Lbl>
