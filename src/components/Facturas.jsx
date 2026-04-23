@@ -230,8 +230,9 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
   // ============================================================
   // DUPLICAR
   // ============================================================
-  const duplicar = async (f) => {
+const duplicar = async (f) => {
     try {
+      // NO enviamos IVA ni IRPF porque son fórmulas en Airtable (se calculan solas desde Base)
       const copia = {
         "Nº Factura": "",
         "Fecha": hoy(),
@@ -239,15 +240,11 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
         "Estado": "Pendiente"
       };
       if (f.clienteId) copia["Cliente"] = [f.clienteId];
-      // IVA e IRPF se enviarán, y si son fórmula en Airtable se ignorarán
-      if (f.iva) copia["IVA (€)"] = f.iva;
-      if (f.irpf) copia["IRPF (€)"] = f.irpf;
 
       const created = await createRecord("Ingresos", copia);
-      await onRefresh();
-
-      // Abrir el editor en la copia recién creada
       const nuevoId = created.records?.[0]?.id;
+
+      // Abrir el editor ANTES del refresh, para que al actualizarse la lista ya esté listo
       if (nuevoId) {
         setEditId(nuevoId);
         setEditForm({
@@ -261,10 +258,12 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
           fechaCobro: ""
         });
       }
+
+      await onRefresh();
     } catch (e) {
       alert("Error al duplicar: " + e.message);
     }
-  };
+  }; 
 
   // ============================================================
   // CAMBIO DE ESTADO RÁPIDO
