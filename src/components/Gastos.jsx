@@ -280,7 +280,7 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
   // ============================================================
   // DUPLICAR
   // ============================================================
-  const duplicar = async (g) => {
+const duplicar = async (g) => {
     try {
       const copia = {
         "Concepto": g.fields["Concepto"] || "Gasto",
@@ -293,10 +293,9 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
       if (g.fields["Periodicidad"]) copia["Periodicidad"] = g.fields["Periodicidad"];
 
       const created = await createRecord("Gastos", copia);
-      await onRefresh();
-
-      // Abrir el editor en la copia recién creada
       const nuevoId = created.records?.[0]?.id;
+
+      // Abrir el editor ANTES del refresh, para que al actualizarse la lista ya esté listo
       if (nuevoId) {
         setEditId(nuevoId);
         setEditForm({
@@ -309,6 +308,8 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
           period: copia["Periodicidad"] || ""
         });
       }
+
+      await onRefresh();
     } catch (e) {
       alert("Error al duplicar: " + e.message);
     }
