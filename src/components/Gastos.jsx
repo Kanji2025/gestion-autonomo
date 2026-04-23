@@ -282,6 +282,7 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
   // DUPLICAR
   // ============================================================
 const duplicar = async (g) => {
+    console.log("🔵 DUPLICAR: inicio", g);
     try {
       const copia = {
         "Concepto": g.fields["Concepto"] || "Gasto",
@@ -293,15 +294,18 @@ const duplicar = async (g) => {
       if (g.fields["Tipo de Gasto"]) copia["Tipo de Gasto"] = g.fields["Tipo de Gasto"];
       if (g.fields["Periodicidad"]) copia["Periodicidad"] = g.fields["Periodicidad"];
 
+      console.log("🔵 DUPLICAR: enviando a crear", copia);
       const created = await createRecord("Gastos", copia);
+      console.log("🔵 DUPLICAR: creado", created);
       const nuevoId = created.records?.[0]?.id;
+      console.log("🔵 DUPLICAR: nuevoId =", nuevoId);
 
       if (!nuevoId) {
         alert("No se pudo crear la copia");
         return;
       }
 
-      // Mostrar el editor inmediatamente con los datos en memoria
+      console.log("🔵 DUPLICAR: setEditId + setEditForm + setForcedEditVisible");
       setEditId(nuevoId);
       setEditForm({
         concepto: copia["Concepto"],
@@ -314,13 +318,14 @@ const duplicar = async (g) => {
       });
       setForcedEditVisible(true);
 
-      // Refresh en segundo plano (no bloqueante)
+      console.log("🔵 DUPLICAR: lanzando onRefresh en segundo plano");
       onRefresh();
+      console.log("🔵 DUPLICAR: final - editor debería estar visible");
     } catch (e) {
+      console.error("🔴 DUPLICAR error:", e);
       alert("Error al duplicar: " + e.message);
     }
   };
-
   // ============================================================
   // EDICIÓN INLINE
   // ============================================================
@@ -623,8 +628,21 @@ const saveEdit = async () => {
         </div>
       </div>
 {/* Editor virtual cuando duplicamos (el gasto aún no está en la lista) */}
+      {(() => {
+        console.log("🟢 RENDER check:", {
+          forcedEditVisible,
+          editId,
+          editFormExists: !!editForm,
+          estaEnLista: editId ? fg.some(g => g.id === editId) : null,
+          totalGastos: fg.length
+        });
+        return null;
+      })()}
       {forcedEditVisible && editId && editForm && !fg.some(g => g.id === editId) && (
-        <div>{renderEditForm()}</div>
+        <div style={{ border: "3px solid red", padding: 4 }}>
+          <div style={{ color: "red", fontSize: 11 }}>EDITOR VIRTUAL (debug)</div>
+          {renderEditForm()}
+        </div>
       )}
       {fijos.length > 0 && (
         <Card>
