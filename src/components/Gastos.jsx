@@ -67,22 +67,13 @@ function DotMenu({ onEdit, onDuplicate, onDelete, disabled }) {
           zIndex: 50,
           overflow: "hidden"
         }}>
-          <button
-            onClick={() => { setOpen(false); onEdit(); }}
-            style={menuItemStyle(B.text)}
-          >
+          <button onClick={() => { setOpen(false); onEdit(); }} style={menuItemStyle(B.text)}>
             ✏️ Editar
           </button>
-          <button
-            onClick={() => { setOpen(false); onDuplicate(); }}
-            style={menuItemStyle(B.purple)}
-          >
+          <button onClick={() => { setOpen(false); onDuplicate(); }} style={menuItemStyle(B.purple)}>
             📋 Duplicar
           </button>
-          <button
-            onClick={() => { setOpen(false); onDelete(); }}
-            style={menuItemStyle(B.red)}
-          >
+          <button onClick={() => { setOpen(false); onDelete(); }} style={menuItemStyle(B.red)}>
             🗑 Borrar
           </button>
         </div>
@@ -118,19 +109,21 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
   const [showFManual, setShowFManual] = useState(false);
   const [sav, setSav] = useState(false);
   const [delId, setDelId] = useState(null);
-  const [editId, setEditId] = useState(null);
-  const [editForm, setEditForm] = useState(null);
-  const [savingEdit, setSavingEdit] = useState(false);
-  const [forcedEditVisible, setForcedEditVisible] = useState(false);
   const [err, setErr] = useState("");
 
-  // Estado formulario manual (alta)
+  // Edición: usamos un único estado `pendingEdit` que contiene TODO lo necesario
+  // para mostrar el editor, incluso si el gasto aún no aparece en la lista.
+  const [pendingEdit, setPendingEdit] = useState(null);
+  // pendingEdit = { id, form } | null
+
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  // Estado del formulario manual
   const [form, setForm] = useState({
     concepto: "", proveedor: "", fecha: hoy(), base: "", iva: "", irpf: "",
     tipo: "", period: "", esFijo: false, periodFijo: "Mensual", monedaFijo: "EUR"
   });
 
-  // Modal de duplicado (para gasto fijo repetido)
   const [duplicadoModal, setDuplicadoModal] = useState(null);
 
   const fg = applyF(gastos, filtro);
@@ -143,13 +136,10 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
   }, 0);
 
   // ============================================================
-  // GUARDAR MANUAL (con lógica de gasto fijo)
+  // ALTA MANUAL (con toggle de gasto fijo)
   // ============================================================
   const save = async () => {
-    if (!form.concepto || !form.base) {
-      setErr("Concepto y base son obligatorios");
-      return;
-    }
+    if (!form.concepto || !form.base) { setErr("Concepto y base son obligatorios"); return; }
     if (form.esFijo && !form.proveedor.trim()) {
       setErr("Para dar de alta un gasto fijo necesitas rellenar el proveedor");
       return;
@@ -170,20 +160,13 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
       const created = await createRecord("Gastos", f);
       const nuevoGastoId = created.records?.[0]?.id;
 
-      // Si es gasto fijo, gestionar alta/duplicado
       if (form.esFijo && form.proveedor.trim()) {
         const existente = await findGastoFijoByProveedor(form.proveedor.trim());
-
         if (existente) {
-          setDuplicadoModal({
-            existente,
-            nuevoGastoId,
-            proveedor: form.proveedor.trim()
-          });
+          setDuplicadoModal({ existente, nuevoGastoId, proveedor: form.proveedor.trim() });
           setSav(false);
-          return; // espera decisión del usuario en el modal
+          return;
         }
-
         try {
           const nuevoFijoId = await createGastoFijo({
             nombre: form.proveedor.trim(),
@@ -201,7 +184,6 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
         }
       }
 
-      // Éxito (sin modal)
       setForm({
         concepto: "", proveedor: "", fecha: hoy(), base: "", iva: "", irpf: "",
         tipo: "", period: "", esFijo: false, periodFijo: "Mensual", monedaFijo: "EUR"
@@ -215,7 +197,7 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
   };
 
   // ============================================================
-  // ACCIONES DEL MODAL DE DUPLICADO
+  // MODAL DUPLICADO DE GASTO FIJO
   // ============================================================
   const enlazarAExistente = async () => {
     const { existente, nuevoGastoId } = duplicadoModal;
@@ -224,9 +206,7 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
         await linkGastoToGastoFijo(nuevoGastoId, existente.id);
       }
       cerrarModal();
-    } catch (e) {
-      alert("Error al enlazar: " + e.message);
-    }
+    } catch (e) { alert("Error al enlazar: " + e.message); }
   };
 
   const crearDuplicado = async () => {
@@ -244,14 +224,10 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
         await linkGastoToGastoFijo(nuevoGastoId, nuevoFijoId);
       }
       cerrarModal();
-    } catch (e) {
-      alert("Error al crear: " + e.message);
-    }
+    } catch (e) { alert("Error al crear: " + e.message); }
   };
 
-  const cancelarGastoFijo = () => {
-    cerrarModal();
-  };
+  const cancelarGastoFijo = () => { cerrarModal(); };
 
   const cerrarModal = () => {
     setDuplicadoModal(null);
@@ -272,16 +248,14 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
     try {
       await deleteRecord("Gastos", id);
       await onRefresh();
-    } catch (e) {
-      alert("Error al borrar: " + e.message);
-    }
+    } catch (e) { alert("Error al borrar: " + e.message); }
     setDelId(null);
   };
 
   // ============================================================
   // DUPLICAR
   // ============================================================
-const duplicar = async (g) => {
+  const duplicar = async (g) => {
     try {
       const copia = {
         "Concepto": g.fields["Concepto"] || "Gasto",
@@ -295,78 +269,71 @@ const duplicar = async (g) => {
 
       const created = await createRecord("Gastos", copia);
       const nuevoId = created.records?.[0]?.id;
+      if (!nuevoId) { alert("No se pudo crear la copia"); return; }
 
-      if (!nuevoId) {
-        alert("No se pudo crear la copia");
-        return;
-      }
-
-      // IMPORTANTE: llamamos a onRefresh PRIMERO y esperamos a que termine.
-      // Solo DESPUÉS ponemos el editId. Así cuando React re-renderiza,
-      // el gasto nuevo ya está en la lista y el editor se abre correctamente.
-      await onRefresh();
-
-      setEditId(nuevoId);
-      setEditForm({
-        concepto: copia["Concepto"],
-        fecha: copia["Fecha"],
-        base: String(copia["Base Imponible"]),
-        iva: String(copia["IVA Soportado (€)"]),
-        irpf: String(copia["IRPF Retenido (€)"] || ""),
-        tipo: copia["Tipo de Gasto"] || "",
-        period: copia["Periodicidad"] || ""
+      // Guardar el editor pendiente INMEDIATAMENTE (no esperamos al refresh)
+      setPendingEdit({
+        id: nuevoId,
+        form: {
+          concepto: copia["Concepto"],
+          fecha: copia["Fecha"],
+          base: String(copia["Base Imponible"]),
+          iva: String(copia["IVA Soportado (€)"]),
+          irpf: String(copia["IRPF Retenido (€)"] || ""),
+          tipo: copia["Tipo de Gasto"] || "",
+          period: copia["Periodicidad"] || ""
+        }
       });
-      setForcedEditVisible(true);
-    } catch (e) {
-      console.error("Error al duplicar:", e);
-      alert("Error al duplicar: " + e.message);
-    }
+
+      // Refresh en segundo plano (no await, no bloquea)
+      onRefresh();
+    } catch (e) { alert("Error al duplicar: " + e.message); }
   };
+
   // ============================================================
-  // EDICIÓN INLINE
+  // EDICIÓN
   // ============================================================
-  const startEdit = (gasto) => {
-    setEditId(gasto.id);
-    setEditForm({
-      concepto: gasto.fields["Concepto"] || "",
-      fecha: gasto.fields["Fecha"] || hoy(),
-      base: String(gasto.fields["Base Imponible"] || ""),
-      iva: String(gasto.fields["IVA Soportado (€)"] || "0"),
-      irpf: String(gasto.fields["IRPF Retenido (€)"] || ""),
-      tipo: gasto.fields["Tipo de Gasto"] || "",
-      period: gasto.fields["Periodicidad"] || ""
+  const startEdit = (g) => {
+    setPendingEdit({
+      id: g.id,
+      form: {
+        concepto: g.fields["Concepto"] || "",
+        fecha: g.fields["Fecha"] || hoy(),
+        base: String(g.fields["Base Imponible"] || ""),
+        iva: String(g.fields["IVA Soportado (€)"] || "0"),
+        irpf: String(g.fields["IRPF Retenido (€)"] || ""),
+        tipo: g.fields["Tipo de Gasto"] || "",
+        period: g.fields["Periodicidad"] || ""
+      }
     });
   };
 
-  const cancelEdit = () => {
-    setEditId(null);
-    setEditForm(null);
-    setForcedEditVisible(false);
+  const cancelEdit = () => { setPendingEdit(null); };
+
+  const updateEditField = (field, value) => {
+    setPendingEdit(prev => prev ? { ...prev, form: { ...prev.form, [field]: value } } : null);
   };
 
-const saveEdit = async () => {
-    if (!editForm.concepto || !editForm.base) {
-      alert("Concepto y base son obligatorios");
-      return;
-    }
+  const saveEdit = async () => {
+    if (!pendingEdit) return;
+    const { id, form: ef } = pendingEdit;
+    if (!ef.concepto || !ef.base) { alert("Concepto y base son obligatorios"); return; }
     setSavingEdit(true);
     try {
       const fields = {
-        "Concepto": editForm.concepto,
-        "Fecha": editForm.fecha,
-        "Base Imponible": Number(editForm.base) || 0,
-        "IVA Soportado (€)": editForm.iva && editForm.iva !== "" ? Number(editForm.iva) : 0,
-        "IRPF Retenido (€)": editForm.irpf && editForm.irpf !== "" ? Number(editForm.irpf) : 0
+        "Concepto": ef.concepto,
+        "Fecha": ef.fecha,
+        "Base Imponible": Number(ef.base) || 0,
+        "IVA Soportado (€)": ef.iva && ef.iva !== "" ? Number(ef.iva) : 0,
+        "IRPF Retenido (€)": ef.irpf && ef.irpf !== "" ? Number(ef.irpf) : 0
       };
-      if (editForm.tipo) fields["Tipo de Gasto"] = editForm.tipo;
-      if (editForm.period) fields["Periodicidad"] = editForm.period;
+      if (ef.tipo) fields["Tipo de Gasto"] = ef.tipo;
+      if (ef.period) fields["Periodicidad"] = ef.period;
 
-      await updateRecord("Gastos", editId, fields);
-      cancelEdit();
+      await updateRecord("Gastos", id, fields);
+      setPendingEdit(null);
       await onRefresh();
-    } catch (e) {
-      alert("Error al actualizar: " + e.message);
-    }
+    } catch (e) { alert("Error al actualizar: " + e.message); }
     setSavingEdit(false);
   };
 
@@ -384,42 +351,46 @@ const saveEdit = async () => {
     );
   }
 
-  const renderEditForm = () => (
-    <Card style={{ border: `2px solid ${B.purple}`, marginTop: 8, marginBottom: 8 }}>
-      <Lbl><span style={{ color: B.purple }}>EDITAR GASTO</span></Lbl>
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: `repeat(${formColumns}, 1fr)`,
-        gap: 14,
-        marginTop: 14
-      }}>
-        <Inp label="Concepto" value={editForm.concepto} onChange={v => setEditForm({ ...editForm, concepto: v })} />
-        <Inp label="Fecha" value={editForm.fecha} onChange={v => setEditForm({ ...editForm, fecha: v })} type="date" />
-        <Inp label="Base Imponible (€)" value={editForm.base} onChange={v => setEditForm({ ...editForm, base: v })} type="number" />
-        <Inp label="IVA Soportado (€)" value={editForm.iva} onChange={v => setEditForm({ ...editForm, iva: v })} type="number" ph="0 si no lleva IVA" />
-        <Inp label="IRPF Retenido (€)" value={editForm.irpf} onChange={v => setEditForm({ ...editForm, irpf: v })} type="number" ph="0 si no aplica" />
-        <Sel label="Tipo de Gasto" value={editForm.tipo} onChange={v => setEditForm({ ...editForm, tipo: v })} options={["Fijo", "Variable", "Impuesto"]} />
-        <Sel label="Periodicidad" value={editForm.period} onChange={v => setEditForm({ ...editForm, period: v })} options={["Mensual", "Trimestral", "Anual", "Puntual"]} />
-      </div>
-      <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-        <button onClick={saveEdit} disabled={savingEdit} style={{ ...B.btn, flex: 1, opacity: savingEdit ? 0.5 : 1 }}>
-          {savingEdit ? "GUARDANDO..." : "GUARDAR CAMBIOS"}
-        </button>
-        <button onClick={cancelEdit} style={{
-          ...B.btn,
-          flex: 1,
-          background: "transparent",
-          color: B.text,
-          border: `2px solid ${B.text}`
+  const renderEditForm = () => {
+    if (!pendingEdit) return null;
+    const ef = pendingEdit.form;
+    return (
+      <Card style={{ border: `2px solid ${B.purple}`, marginTop: 8, marginBottom: 8 }}>
+        <Lbl><span style={{ color: B.purple }}>EDITAR GASTO</span></Lbl>
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${formColumns}, 1fr)`,
+          gap: 14,
+          marginTop: 14
         }}>
-          CANCELAR
-        </button>
-      </div>
-    </Card>
-  );
+          <Inp label="Concepto" value={ef.concepto} onChange={v => updateEditField("concepto", v)} />
+          <Inp label="Fecha" value={ef.fecha} onChange={v => updateEditField("fecha", v)} type="date" />
+          <Inp label="Base Imponible (€)" value={ef.base} onChange={v => updateEditField("base", v)} type="number" />
+          <Inp label="IVA Soportado (€)" value={ef.iva} onChange={v => updateEditField("iva", v)} type="number" ph="0 si no lleva IVA" />
+          <Inp label="IRPF Retenido (€)" value={ef.irpf} onChange={v => updateEditField("irpf", v)} type="number" ph="0 si no aplica" />
+          <Sel label="Tipo de Gasto" value={ef.tipo} onChange={v => updateEditField("tipo", v)} options={["Fijo", "Variable", "Impuesto"]} />
+          <Sel label="Periodicidad" value={ef.period} onChange={v => updateEditField("period", v)} options={["Mensual", "Trimestral", "Anual", "Puntual"]} />
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+          <button onClick={saveEdit} disabled={savingEdit} style={{ ...B.btn, flex: 1, opacity: savingEdit ? 0.5 : 1 }}>
+            {savingEdit ? "GUARDANDO..." : "GUARDAR CAMBIOS"}
+          </button>
+          <button onClick={cancelEdit} style={{
+            ...B.btn,
+            flex: 1,
+            background: "transparent",
+            color: B.text,
+            border: `2px solid ${B.text}`
+          }}>
+            CANCELAR
+          </button>
+        </div>
+      </Card>
+    );
+  };
 
   const renderGasto = (g, showPeriod = false) => {
-    const isEditing = editId === g.id;
+    const isEditing = pendingEdit?.id === g.id;
     const base = g.fields["Base Imponible"] || 0;
     const iva = g.fields["IVA Soportado (€)"] || 0;
     const irpf = g.fields["IRPF Retenido (€)"] || 0;
@@ -484,6 +455,9 @@ const saveEdit = async () => {
     );
   };
 
+  // ¿El gasto en edición aún no está en la lista (caso duplicar recién creado)?
+  const pendingNotInList = pendingEdit && !fg.some(g => g.id === pendingEdit.id);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
       <SectionHeader
@@ -526,7 +500,6 @@ const saveEdit = async () => {
             <Sel label="Periodicidad" value={form.period} onChange={v => setForm({ ...form, period: v })} options={["Mensual", "Trimestral", "Anual", "Puntual"]} />
           </div>
 
-          {/* TOGGLE "¿Es un gasto fijo recurrente?" */}
           <div style={{
             marginTop: 18,
             padding: 14,
@@ -535,23 +508,12 @@ const saveEdit = async () => {
             borderRadius: 10,
             transition: "all 0.2s ease"
           }}>
-            <label style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              cursor: "pointer",
-              userSelect: "none"
-            }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", userSelect: "none" }}>
               <input
                 type="checkbox"
                 checked={form.esFijo}
                 onChange={e => setForm({ ...form, esFijo: e.target.checked })}
-                style={{
-                  width: 20,
-                  height: 20,
-                  accentColor: B.purple,
-                  cursor: "pointer"
-                }}
+                style={{ width: 20, height: 20, accentColor: B.purple, cursor: "pointer" }}
               />
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 700, fontSize: 14, fontFamily: B.tS }}>
@@ -572,18 +534,8 @@ const saveEdit = async () => {
                 paddingTop: 14,
                 borderTop: `1px solid ${B.border}`
               }}>
-                <Sel
-                  label="Periodicidad del Fijo"
-                  value={form.periodFijo}
-                  onChange={v => setForm({ ...form, periodFijo: v })}
-                  options={["Mensual", "Trimestral", "Anual"]}
-                />
-                <Sel
-                  label="Moneda"
-                  value={form.monedaFijo}
-                  onChange={v => setForm({ ...form, monedaFijo: v })}
-                  options={["EUR", "USD", "GBP"]}
-                />
+                <Sel label="Periodicidad del Fijo" value={form.periodFijo} onChange={v => setForm({ ...form, periodFijo: v })} options={["Mensual", "Trimestral", "Anual"]} />
+                <Sel label="Moneda" value={form.monedaFijo} onChange={v => setForm({ ...form, monedaFijo: v })} options={["EUR", "USD", "GBP"]} />
                 {!form.proveedor && (
                   <div style={{
                     gridColumn: "1 / -1",
@@ -613,7 +565,6 @@ const saveEdit = async () => {
         </Card>
       )}
 
-      {/* Resumen "Aparta cada mes" */}
       <div style={{ background: B.text, borderRadius: 12, padding: 24, color: "#fff" }}>
         <Lbl><span style={{ color: "rgba(255,255,255,0.6)" }}>APARTA CADA MES</span></Lbl>
         <div style={{ fontSize: 38, fontWeight: 700, marginTop: 6, fontFamily: B.tM }}>
@@ -623,10 +574,24 @@ const saveEdit = async () => {
           Suma prorrateada de tus gastos fijos (mensual + trimestral/3 + anual/12)
         </div>
       </div>
-{/* Editor virtual cuando duplicamos (el gasto aún no está en la lista) */}
-      {forcedEditVisible && editId && editForm && !fg.some(g => g.id === editId) && (
-        <div>{renderEditForm()}</div>
+
+      {/* Editor virtual: si el gasto en edición no está en la lista todavía */}
+      {pendingNotInList && (
+        <Card style={{ border: `2px solid ${B.amber}` }}>
+          <div style={{
+            fontSize: 11,
+            color: B.amber,
+            fontWeight: 700,
+            fontFamily: B.tM,
+            textTransform: "uppercase",
+            marginBottom: 8
+          }}>
+            🆕 Gasto recién duplicado — edita y guarda
+          </div>
+          {renderEditForm()}
+        </Card>
       )}
+
       {fijos.length > 0 && (
         <Card>
           <Lbl>Gastos Fijos ({fijos.length})</Lbl>
@@ -657,10 +622,7 @@ const saveEdit = async () => {
       {duplicadoModal && (
         <div style={{
           position: "fixed",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
+          top: 0, left: 0, right: 0, bottom: 0,
           background: "rgba(0,0,0,0.55)",
           backdropFilter: "blur(3px)",
           zIndex: 300,
@@ -678,48 +640,25 @@ const saveEdit = async () => {
             boxShadow: "0 20px 60px rgba(0,0,0,0.3)"
           }}>
             <div style={{ fontSize: 32, marginBottom: 10 }}>⚠️</div>
-            <div style={{
-              fontSize: 16,
-              fontWeight: 700,
-              fontFamily: B.tS,
-              marginBottom: 10
-            }}>
+            <div style={{ fontSize: 16, fontWeight: 700, fontFamily: B.tS, marginBottom: 10 }}>
               Ya existe un gasto fijo para «{duplicadoModal.proveedor}»
             </div>
-            <div style={{
-              fontSize: 13,
-              color: B.muted,
-              marginBottom: 20,
-              lineHeight: 1.5
-            }}>
+            <div style={{ fontSize: 13, color: B.muted, marginBottom: 20, lineHeight: 1.5 }}>
               Tienes registrado un Gasto Fijo con este proveedor
               ({duplicadoModal.existente.fields["Activa"] === "Sí" ? "activo" : "dado de baja"}).
               El gasto ya se ha guardado correctamente. ¿Qué quieres hacer con la parte del Gasto Fijo?
             </div>
-
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <button onClick={enlazarAExistente} style={{
-                ...B.btn,
-                background: B.green,
-                width: "100%"
-              }}>
+              <button onClick={enlazarAExistente} style={{ ...B.btn, background: B.green, width: "100%" }}>
                 ✅ ENLAZAR AL GASTO FIJO EXISTENTE
               </button>
               <button onClick={crearDuplicado} style={{
-                ...B.btn,
-                background: "transparent",
-                color: B.purple,
-                border: `2px solid ${B.purple}`,
-                width: "100%"
+                ...B.btn, background: "transparent", color: B.purple, border: `2px solid ${B.purple}`, width: "100%"
               }}>
                 ➕ CREAR UNO NUEVO (duplicado)
               </button>
               <button onClick={cancelarGastoFijo} style={{
-                ...B.btn,
-                background: "transparent",
-                color: B.muted,
-                border: `1px solid ${B.border}`,
-                width: "100%"
+                ...B.btn, background: "transparent", color: B.muted, border: `1px solid ${B.border}`, width: "100%"
               }}>
                 NO ENLAZAR A NINGUNO
               </button>
