@@ -261,6 +261,7 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
   // DUPLICAR
   // ============================================================
   const duplicar = async (g) => {
+    alert("PASO 1: inicio duplicar");
     try {
       const copia = {
         "Concepto": g.fields["Concepto"] || "Gasto",
@@ -272,9 +273,12 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
       if (g.fields["Tipo de Gasto"]) copia["Tipo de Gasto"] = g.fields["Tipo de Gasto"];
       if (g.fields["Periodicidad"]) copia["Periodicidad"] = g.fields["Periodicidad"];
 
+      alert("PASO 2: voy a crear el registro");
       const created = await createRecord("Gastos", copia);
+      alert("PASO 3: creado. ID = " + (created.records?.[0]?.id || "NULL"));
+
       const nuevoId = created.records?.[0]?.id;
-      if (!nuevoId) { alert("No se pudo crear la copia"); return; }
+      if (!nuevoId) { alert("NO HAY ID"); return; }
 
       const editPayload = {
         id: nuevoId,
@@ -289,15 +293,15 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
         }
       };
 
-      // PRIMERO refrescamos (que llega props nuevas al componente)
-      await onRefresh();
-
-      // DESPUÉS del refresh, ponemos el pendingEdit.
-      // Así el setState no se pisa por el re-render del refresh.
+      alert("PASO 4: voy a llamar setPendingEdit");
       setPendingEdit(editPayload);
+      alert("PASO 5: setPendingEdit llamado. pendingEditRef.current = " + JSON.stringify(pendingEditRef.current?.id || "VACIO"));
+
+      alert("PASO 6: voy a hacer onRefresh");
+      await onRefresh();
+      alert("PASO 7: refresh terminado. pendingEditRef.current sigue siendo = " + JSON.stringify(pendingEditRef.current?.id || "VACIO"));
     } catch (e) {
-      console.error("Duplicar error:", e);
-      alert("Error al duplicar: " + e.message);
+      alert("ERROR: " + e.message);
     }
   };
   // ============================================================
