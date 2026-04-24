@@ -403,8 +403,11 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
     );
   };
 
-  const renderGasto = (g, showPeriod = false) => {
+ const renderGasto = (g, showPeriod = false) => {
     const isEditing = pendingEdit?.id === g.id;
+    if (isEditing) {
+      console.log("🎯 RENDER EDITOR para", g.id, "concepto:", g.fields["Concepto"]);
+    }
     const base = g.fields["Base Imponible"] || 0;
     const iva = g.fields["IVA Soportado (€)"] || 0;
     const irpf = g.fields["IRPF Retenido (€)"] || 0;
@@ -413,7 +416,11 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
     const gastoFijoIds = g.fields["Gasto Fijo"] || [];
     const esFijo = gastoFijoIds.length > 0;
 
-    if (isEditing) return <div key={g.id}>{renderEditForm()}</div>;
+    if (isEditing) return (
+      <div key={g.id} id={"editor-" + g.id} style={{ scrollMarginTop: 100 }}>
+        {renderEditForm()}
+      </div>
+    );
 
     return (
       <div key={g.id} style={{
