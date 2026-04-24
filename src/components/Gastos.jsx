@@ -113,7 +113,12 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
 
   // Edición: usamos un único estado `pendingEdit` que contiene TODO lo necesario
   // para mostrar el editor, incluso si el gasto aún no aparece en la lista.
-  const [pendingEdit, setPendingEdit] = useState(null);
+ const [pendingEdit, _setPendingEdit] = useState(null);
+  const pendingEditRef = useRef(null);
+  const setPendingEdit = (val) => {
+    pendingEditRef.current = val;
+    _setPendingEdit(val);
+  };
   // pendingEdit = { id, form } | null
 
   const [savingEdit, setSavingEdit] = useState(false);
@@ -271,8 +276,7 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
       const nuevoId = created.records?.[0]?.id;
       if (!nuevoId) { alert("No se pudo crear la copia"); return; }
 
-      // Guardar el editor pendiente INMEDIATAMENTE (no esperamos al refresh)
-      setPendingEdit({
+      const editPayload = {
         id: nuevoId,
         form: {
           concepto: copia["Concepto"],
@@ -283,13 +287,19 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
           tipo: copia["Tipo de Gasto"] || "",
           period: copia["Periodicidad"] || ""
         }
-      });
+      };
 
-      // Refresh en segundo plano (no await, no bloquea)
-      onRefresh();
-    } catch (e) { alert("Error al duplicar: " + e.message); }
+      // PRIMERO refrescamos (que llega props nuevas al componente)
+      await onRefresh();
+
+      // DESPUÉS del refresh, ponemos el pendingEdit.
+      // Así el setState no se pisa por el re-render del refresh.
+      setPendingEdit(editPayload);
+    } catch (e) {
+      console.error("Duplicar error:", e);
+      alert("Error al duplicar: " + e.message);
+    }
   };
-
   // ============================================================
   // EDICIÓN
   // ============================================================
