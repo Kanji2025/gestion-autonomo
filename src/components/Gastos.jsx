@@ -300,7 +300,16 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
       alert("PASO 6: voy a hacer onRefresh");
       await onRefresh();
       alert("PASO 7: refresh terminado. pendingEditRef.current sigue siendo = " + JSON.stringify(pendingEditRef.current?.id || "VACIO"));
-    } catch (e) {
+   // Hacer scroll al editor para que el usuario lo vea
+      setTimeout(() => {
+        const el = document.getElementById("editor-" + nuevoId);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          alert("PASO 8: editor ENCONTRADO y he hecho scroll a él");
+        } else {
+          alert("PASO 8: editor NO encontrado en el DOM. Esto confirma el bug de render.");
+        }
+      }, 300); } catch (e) {
       alert("ERROR: " + e.message);
     }
   };
