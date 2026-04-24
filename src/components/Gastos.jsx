@@ -1,6 +1,7 @@
 // src/components/Gastos.jsx
-// Sección de Gastos: alta manual (con toggle de gasto fijo) + OCR/IA + edición + duplicado + borrado.
+// Sección de Gastos: alta manual + OCR/IA + edición + duplicado + borrado.
 // Menú de 3 puntos (⋮) con Editar/Duplicar/Borrar.
+// Gestiona gastos fijos recurrentes (alta + duplicado).
 
 import { useState, useEffect, useRef } from "react";
 import { B, fmt, hoy, applyF } from "../utils.js";
@@ -32,6 +33,20 @@ function DotMenu({ onEdit, onDuplicate, onDelete, disabled }) {
       return () => document.removeEventListener("mousedown", handler);
     }
   }, [open]);
+
+  const menuItemStyle = (color) => ({
+    display: "block",
+    width: "100%",
+    padding: "10px 14px",
+    textAlign: "left",
+    background: "transparent",
+    border: "none",
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: 600,
+    fontFamily: B.tS,
+    color
+  });
 
   return (
     <div ref={ref} style={{ position: "relative" }}>
@@ -82,55 +97,34 @@ function DotMenu({ onEdit, onDuplicate, onDelete, disabled }) {
   );
 }
 
-function menuItemStyle(color) {
-  return {
-    display: "block",
-    width: "100%",
-    padding: "10px 14px",
-    textAlign: "left",
-    background: "transparent",
-    border: "none",
-    cursor: "pointer",
-    fontSize: 13,
-    fontWeight: 600,
-    fontFamily: B.tS,
-    color,
-    transition: "background 0.1s ease"
-  };
-}
-
 // ============================================================
 // COMPONENTE PRINCIPAL
 // ============================================================
 export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
   const { isMobile, formColumns } = useResponsive();
 
+  // Estados UI
   const [showOCR, setShowOCR] = useState(false);
   const [showFManual, setShowFManual] = useState(false);
   const [sav, setSav] = useState(false);
   const [delId, setDelId] = useState(null);
   const [err, setErr] = useState("");
-
-  // Edición: usamos un único estado `pendingEdit` que contiene TODO lo necesario
-  // para mostrar el editor, incluso si el gasto aún no aparece en la lista.
- const [pendingEdit, _setPendingEdit] = useState(null);
-  const pendingEditRef = useRef(null);
-  const setPendingEdit = (val) => {
-    pendingEditRef.current = val;
-    _setPendingEdit(val);
-  };
-  // pendingEdit = { id, form } | null
-
   const [savingEdit, setSavingEdit] = useState(false);
 
-  // Estado del formulario manual
+  // Edición: un único estado para todo
+  const [editState, setEditState] = useState(null);
+  // editState = { id, form } | null
+
+  // Formulario manual de alta
   const [form, setForm] = useState({
     concepto: "", proveedor: "", fecha: hoy(), base: "", iva: "", irpf: "",
     tipo: "", period: "", esFijo: false, periodFijo: "Mensual", monedaFijo: "EUR"
   });
 
+  // Modal de duplicado de gasto fijo (cuando ya existe uno igual)
   const [duplicadoModal, setDuplicadoModal] = useState(null);
 
+  // Filtrado
   const fg = applyF(gastos, filtro);
   const fijos = fg.filter(r => ["Mensual", "Anual", "Trimestral"].includes(r.fields["Periodicidad"]));
   const vars = fg.filter(r => !["Mensual", "Anual", "Trimestral"].includes(r.fields["Periodicidad"]));
@@ -143,8 +137,18 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
   // ============================================================
   // ALTA MANUAL (con toggle de gasto fijo)
   // ============================================================
+  const resetForm = () => {
+    setForm({
+      concepto: "", proveedor: "", fecha: hoy(), base: "", iva: "", irpf: "",
+      tipo: "", period: "", esFijo: false, periodFijo: "Mensual", monedaFijo: "EUR"
+    });
+  };
+
   const save = async () => {
-    if (!form.concepto || !form.base) { setErr("Concepto y base son obligatorios"); return; }
+    if (!form.concepto || !form.base) {
+      setErr("Concepto y base son obligatorios");
+      return;
+    }
     if (form.esFijo && !form.proveedor.trim()) {
       setErr("Para dar de alta un gasto fijo necesitas rellenar el proveedor");
       return;
@@ -189,10 +193,7 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
         }
       }
 
-      setForm({
-        concepto: "", proveedor: "", fecha: hoy(), base: "", iva: "", irpf: "",
-        tipo: "", period: "", esFijo: false, periodFijo: "Mensual", monedaFijo: "EUR"
-      });
+      resetForm();
       setShowFManual(false);
       onRefresh();
     } catch (e) {
@@ -202,7 +203,7 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
   };
 
   // ============================================================
-  // MODAL DUPLICADO DE GASTO FIJO
+  // MODAL DUPLICADO GASTO FIJO
   // ============================================================
   const enlazarAExistente = async () => {
     const { existente, nuevoGastoId } = duplicadoModal;
@@ -210,11 +211,11 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
       if (nuevoGastoId && existente?.id) {
         await linkGastoToGastoFijo(nuevoGastoId, existente.id);
       }
-      cerrarModal();
+      cerrarModalDuplicado();
     } catch (e) { alert("Error al enlazar: " + e.message); }
   };
 
-  const crearDuplicado = async () => {
+  const crearDuplicadoFijo = async () => {
     const { nuevoGastoId } = duplicadoModal;
     try {
       const nuevoFijoId = await createGastoFijo({
@@ -228,18 +229,13 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
       if (nuevoFijoId && nuevoGastoId) {
         await linkGastoToGastoFijo(nuevoGastoId, nuevoFijoId);
       }
-      cerrarModal();
+      cerrarModalDuplicado();
     } catch (e) { alert("Error al crear: " + e.message); }
   };
 
-  const cancelarGastoFijo = () => { cerrarModal(); };
-
-  const cerrarModal = () => {
+  const cerrarModalDuplicado = () => {
     setDuplicadoModal(null);
-    setForm({
-      concepto: "", proveedor: "", fecha: hoy(), base: "", iva: "", irpf: "",
-      tipo: "", period: "", esFijo: false, periodFijo: "Mensual", monedaFijo: "EUR"
-    });
+    resetForm();
     setShowFManual(false);
     onRefresh();
   };
@@ -258,66 +254,10 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
   };
 
   // ============================================================
-  // DUPLICAR
-  // ============================================================
-  const duplicar = async (g) => {
-    alert("PASO 1: inicio duplicar");
-    try {
-      const copia = {
-        "Concepto": g.fields["Concepto"] || "Gasto",
-        "Fecha": hoy(),
-        "Base Imponible": g.fields["Base Imponible"] || 0,
-        "IVA Soportado (€)": g.fields["IVA Soportado (€)"] || 0
-      };
-      if (g.fields["IRPF Retenido (€)"]) copia["IRPF Retenido (€)"] = g.fields["IRPF Retenido (€)"];
-      if (g.fields["Tipo de Gasto"]) copia["Tipo de Gasto"] = g.fields["Tipo de Gasto"];
-      if (g.fields["Periodicidad"]) copia["Periodicidad"] = g.fields["Periodicidad"];
-
-      alert("PASO 2: voy a crear el registro");
-      const created = await createRecord("Gastos", copia);
-      alert("PASO 3: creado. ID = " + (created.records?.[0]?.id || "NULL"));
-
-      const nuevoId = created.records?.[0]?.id;
-      if (!nuevoId) { alert("NO HAY ID"); return; }
-
-      const editPayload = {
-        id: nuevoId,
-        form: {
-          concepto: copia["Concepto"],
-          fecha: copia["Fecha"],
-          base: String(copia["Base Imponible"]),
-          iva: String(copia["IVA Soportado (€)"]),
-          irpf: String(copia["IRPF Retenido (€)"] || ""),
-          tipo: copia["Tipo de Gasto"] || "",
-          period: copia["Periodicidad"] || ""
-        }
-      };
-
-      alert("PASO 4: voy a llamar setPendingEdit");
-      setPendingEdit(editPayload);
-      alert("PASO 5: setPendingEdit llamado. pendingEditRef.current = " + JSON.stringify(pendingEditRef.current?.id || "VACIO"));
-
-      alert("PASO 6: voy a hacer onRefresh");
-      await onRefresh();
-      alert("PASO 7: refresh terminado. pendingEditRef.current sigue siendo = " + JSON.stringify(pendingEditRef.current?.id || "VACIO"));
-   // Hacer scroll al editor para que el usuario lo vea
-      setTimeout(() => {
-        const el = document.getElementById("editor-" + nuevoId);
-        if (el) {
-          el.scrollIntoView({ behavior: "smooth", block: "center" });
-          alert("PASO 8: editor ENCONTRADO y he hecho scroll a él");
-        } else {
-          alert("PASO 8: editor NO encontrado en el DOM. Esto confirma el bug de render.");
-        }
-      }, 300); } catch (e) {
-      alert("ERROR: " + e.message);
-    }
-  };
-  // ============================================================
-  // EDICIÓN
+  // EDITAR / DUPLICAR / GUARDAR EDICIÓN
   // ============================================================
   const startEdit = (g) => {
-    setPendingEdit({
+    setEditState({
       id: g.id,
       form: {
         concepto: g.fields["Concepto"] || "",
@@ -331,16 +271,62 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
     });
   };
 
-  const cancelEdit = () => { setPendingEdit(null); };
+  const duplicar = async (g) => {
+    try {
+      const copia = {
+        "Concepto": g.fields["Concepto"] || "Gasto",
+        "Fecha": hoy(),
+        "Base Imponible": g.fields["Base Imponible"] || 0,
+        "IVA Soportado (€)": g.fields["IVA Soportado (€)"] || 0
+      };
+      if (g.fields["IRPF Retenido (€)"]) copia["IRPF Retenido (€)"] = g.fields["IRPF Retenido (€)"];
+      if (g.fields["Tipo de Gasto"]) copia["Tipo de Gasto"] = g.fields["Tipo de Gasto"];
+      if (g.fields["Periodicidad"]) copia["Periodicidad"] = g.fields["Periodicidad"];
+
+      const created = await createRecord("Gastos", copia);
+      const nuevoId = created.records?.[0]?.id;
+      if (!nuevoId) { alert("No se pudo crear la copia"); return; }
+
+      // Poner el editor en modo edición con los datos de la copia
+      setEditState({
+        id: nuevoId,
+        form: {
+          concepto: copia["Concepto"],
+          fecha: copia["Fecha"],
+          base: String(copia["Base Imponible"]),
+          iva: String(copia["IVA Soportado (€)"]),
+          irpf: String(copia["IRPF Retenido (€)"] || ""),
+          tipo: copia["Tipo de Gasto"] || "",
+          period: copia["Periodicidad"] || ""
+        }
+      });
+
+      // Refresh en segundo plano (no bloqueamos, no afecta al state de edición)
+      onRefresh();
+    } catch (e) {
+      console.error("Duplicar error:", e);
+      alert("Error al duplicar: " + e.message);
+    }
+  };
+
+  const cancelEdit = () => {
+    setEditState(null);
+  };
 
   const updateEditField = (field, value) => {
-    setPendingEdit(prev => prev ? { ...prev, form: { ...prev.form, [field]: value } } : null);
+    setEditState(prev => {
+      if (!prev) return null;
+      return { ...prev, form: { ...prev.form, [field]: value } };
+    });
   };
 
   const saveEdit = async () => {
-    if (!pendingEdit) return;
-    const { id, form: ef } = pendingEdit;
-    if (!ef.concepto || !ef.base) { alert("Concepto y base son obligatorios"); return; }
+    if (!editState) return;
+    const { id, form: ef } = editState;
+    if (!ef.concepto || !ef.base) {
+      alert("Concepto y base son obligatorios");
+      return;
+    }
     setSavingEdit(true);
     try {
       const fields = {
@@ -354,7 +340,7 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
       if (ef.period) fields["Periodicidad"] = ef.period;
 
       await updateRecord("Gastos", id, fields);
-      setPendingEdit(null);
+      setEditState(null);
       await onRefresh();
     } catch (e) { alert("Error al actualizar: " + e.message); }
     setSavingEdit(false);
@@ -374,9 +360,10 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
     );
   }
 
-  const renderEditForm = () => {
-    if (!pendingEdit) return null;
-    const ef = pendingEdit.form;
+  // Formulario editor (reutilizable)
+  const EditForm = () => {
+    if (!editState) return null;
+    const ef = editState.form;
     return (
       <Card style={{ border: `2px solid ${B.purple}`, marginTop: 8, marginBottom: 8 }}>
         <Lbl><span style={{ color: B.purple }}>EDITAR GASTO</span></Lbl>
@@ -412,11 +399,8 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
     );
   };
 
- const renderGasto = (g, showPeriod = false) => {
-    const isEditing = pendingEdit?.id === g.id;
-    if (isEditing) {
-      console.log("🎯 RENDER EDITOR para", g.id, "concepto:", g.fields["Concepto"]);
-    }
+  // Render de una fila de gasto
+  const renderGasto = (g, showPeriod = false) => {
     const base = g.fields["Base Imponible"] || 0;
     const iva = g.fields["IVA Soportado (€)"] || 0;
     const irpf = g.fields["IRPF Retenido (€)"] || 0;
@@ -424,12 +408,6 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
     const periodo = g.fields["Periodicidad"] || "";
     const gastoFijoIds = g.fields["Gasto Fijo"] || [];
     const esFijo = gastoFijoIds.length > 0;
-
-    if (isEditing) return (
-      <div key={g.id} id={"editor-" + g.id} style={{ scrollMarginTop: 100 }}>
-        {renderEditForm()}
-      </div>
-    );
 
     return (
       <div key={g.id} style={{
@@ -485,9 +463,9 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
     );
   };
 
-  // ¿El gasto en edición aún no está en la lista (caso duplicar recién creado)?
-  const pendingNotInList = pendingEdit && !fg.some(g => g.id === pendingEdit.id);
-
+  // ============================================================
+  // RENDER PRINCIPAL
+  // ============================================================
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
       <SectionHeader
@@ -510,6 +488,7 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
 
       <FilterBar filtro={filtro} setFiltro={setFiltro} />
 
+      {/* FORMULARIO MANUAL */}
       {showFManual && (
         <Card style={{ border: `2px solid ${B.purple}` }}>
           <Lbl>Añadir Gasto Manual</Lbl>
@@ -595,6 +574,25 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
         </Card>
       )}
 
+      {/* EDITOR (fijo arriba cuando está activo, siempre visible) */}
+      {editState && (
+        <div>
+          <div style={{
+            fontSize: 11,
+            color: B.purple,
+            fontFamily: B.tM,
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+            marginBottom: 6
+          }}>
+            ✏️ Editando gasto
+          </div>
+          <EditForm />
+        </div>
+      )}
+
+      {/* APARTA CADA MES */}
       <div style={{ background: B.text, borderRadius: 12, padding: 24, color: "#fff" }}>
         <Lbl><span style={{ color: "rgba(255,255,255,0.6)" }}>APARTA CADA MES</span></Lbl>
         <div style={{ fontSize: 38, fontWeight: 700, marginTop: 6, fontFamily: B.tM }}>
@@ -605,23 +603,7 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
         </div>
       </div>
 
-      {/* Editor virtual: si el gasto en edición no está en la lista todavía */}
-      {pendingNotInList && (
-        <Card style={{ border: `2px solid ${B.amber}` }}>
-          <div style={{
-            fontSize: 11,
-            color: B.amber,
-            fontWeight: 700,
-            fontFamily: B.tM,
-            textTransform: "uppercase",
-            marginBottom: 8
-          }}>
-            🆕 Gasto recién duplicado — edita y guarda
-          </div>
-          {renderEditForm()}
-        </Card>
-      )}
-
+      {/* LISTADOS */}
       {fijos.length > 0 && (
         <Card>
           <Lbl>Gastos Fijos ({fijos.length})</Lbl>
@@ -648,7 +630,7 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
         </Card>
       )}
 
-      {/* MODAL DE DUPLICADO (Gasto Fijo ya existe) */}
+      {/* MODAL DUPLICADO DE GASTO FIJO */}
       {duplicadoModal && (
         <div style={{
           position: "fixed",
@@ -676,18 +658,18 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
             <div style={{ fontSize: 13, color: B.muted, marginBottom: 20, lineHeight: 1.5 }}>
               Tienes registrado un Gasto Fijo con este proveedor
               ({duplicadoModal.existente.fields["Activa"] === "Sí" ? "activo" : "dado de baja"}).
-              El gasto ya se ha guardado correctamente. ¿Qué quieres hacer con la parte del Gasto Fijo?
+              El gasto ya se ha guardado correctamente. ¿Qué hacemos con la parte del Gasto Fijo?
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <button onClick={enlazarAExistente} style={{ ...B.btn, background: B.green, width: "100%" }}>
                 ✅ ENLAZAR AL GASTO FIJO EXISTENTE
               </button>
-              <button onClick={crearDuplicado} style={{
+              <button onClick={crearDuplicadoFijo} style={{
                 ...B.btn, background: "transparent", color: B.purple, border: `2px solid ${B.purple}`, width: "100%"
               }}>
                 ➕ CREAR UNO NUEVO (duplicado)
               </button>
-              <button onClick={cancelarGastoFijo} style={{
+              <button onClick={cerrarModalDuplicado} style={{
                 ...B.btn, background: "transparent", color: B.muted, border: `1px solid ${B.border}`, width: "100%"
               }}>
                 NO ENLAZAR A NINGUNO
