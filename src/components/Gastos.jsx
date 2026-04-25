@@ -110,10 +110,10 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
   const [delId, setDelId] = useState(null);
   const [err, setErr] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
+  const [duplicadoToast, setDuplicadoToast] = useState(null);
 
   // Edición: un único estado para todo
   const [editState, setEditState] = useState(null);
-  // editState = { id, form } | null
 
   // Formulario manual de alta
   const [form, setForm] = useState({
@@ -269,9 +269,11 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
         period: g.fields["Periodicidad"] || ""
       }
     });
+    // Scroll suave hasta arriba para ver el editor
+    setTimeout(() => window.scrollTo({ top: 0, behavior: "smooth" }), 50);
   };
 
-const duplicar = async (g) => {
+  const duplicar = async (g) => {
     try {
       const copia = {
         "Concepto": g.fields["Concepto"] || "Gasto",
@@ -283,51 +285,18 @@ const duplicar = async (g) => {
       if (g.fields["Tipo de Gasto"]) copia["Tipo de Gasto"] = g.fields["Tipo de Gasto"];
       if (g.fields["Periodicidad"]) copia["Periodicidad"] = g.fields["Periodicidad"];
 
-      // PASO 1: Abrir el editor PRIMERO con id temporal
-      // Así no hay riesgo de que un re-render lo borre durante el await
-      const idTemporal = "temp-" + Date.now();
-      setEditState({
-        id: idTemporal,
-        isTemp: true,
-        form: {
-          concepto: copia["Concepto"],
-          fecha: copia["Fecha"],
-          base: String(copia["Base Imponible"]),
-          iva: String(copia["IVA Soportado (€)"]),
-          irpf: String(copia["IRPF Retenido (€)"] || ""),
-          tipo: copia["Tipo de Gasto"] || "",
-          period: copia["Periodicidad"] || ""
-        }
+      await createRecord("Gastos", copia);
+      await onRefresh();
+
+      // Mostrar toast verde de éxito (se quita solo en 6 segundos)
+      setDuplicadoToast({
+        concepto: copia["Concepto"],
+        fecha: copia["Fecha"]
       });
-
-      // PASO 2: Crear el registro en segundo plano
-      const created = await createRecord("Gastos", copia);
-      const nuevoId = created.records?.[0]?.id;
-
-      if (!nuevoId) {
-        alert("Se creó el editor pero falló el guardado en Airtable");
-        return;
-      }
-
-      // PASO 3: Actualizar el id real (manteniendo el form)
-      setEditState(prev => prev && prev.isTemp ? {
-        ...prev,
-        id: nuevoId,
-        isTemp: false
-      } : prev);
-
-      // Refresh en segundo plano
-      onRefresh();
+      setTimeout(() => setDuplicadoToast(null), 6000);
     } catch (e) {
       console.error("Duplicar error:", e);
       alert("Error al duplicar: " + (e.message || "desconocido"));
-    }
-  };
-
-// onRefresh();  // <-- DESACTIVADO TEMPORALMENTE para diagnóstico
-      alert("G: SIN onRefresh, fin de la función");
-    } catch (e) {
-      alert("CATCH: " + (e?.message || JSON.stringify(e) || "error sin mensaje"));
     }
   };
 
@@ -382,7 +351,7 @@ const duplicar = async (g) => {
     );
   }
 
-  // Formulario editor (reutilizable)
+  // Formulario editor
   const EditForm = () => {
     if (!editState) return null;
     const ef = editState.form;
@@ -509,17 +478,46 @@ const duplicar = async (g) => {
       />
 
       <FilterBar filtro={filtro} setFiltro={setFiltro} />
-{/* PRUEBA DE DIAGNÓSTICO - si ves este cuadro rojo, editState funciona */}
-      <div style={{
-        background: "red",
-        color: "white",
-        padding: 20,
-        fontSize: 24,
-        fontWeight: 700,
-        border: "5px solid yellow"
-      }}>
-        DEBUG — editState es: {editState ? `ACTIVO (id: ${editState.id})` : "NULL"}
-      </div>
+
+      {/* TOAST DE DUPLICADO (mensaje verde de éxito tras duplicar) */}
+      {duplicadoToast && (
+        <div style={{
+          background: B.green + "15",
+          border: `2px solid ${B.green}`,
+          borderRadius: 10,
+          padding: "14px 18px",
+          color: "#0d6b3a",
+          fontFamily: B.tS,
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap"
+        }}>
+          <div style={{ fontSize: 24 }}>✅</div>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>
+              Gasto duplicado: «{duplicadoToast.concepto}»
+            </div>
+            <div style={{ fontSize: 12, marginTop: 2 }}>
+              Se ha creado una copia con fecha {duplicadoToast.fecha}. Pulsa <strong>⋮ → Editar</strong> en la copia si necesitas modificar algo.
+            </div>
+          </div>
+          <button
+            onClick={() => setDuplicadoToast(null)}
+            style={{
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              color: "#0d6b3a",
+              fontSize: 18,
+              padding: 4
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* FORMULARIO MANUAL */}
       {showFManual && (
         <Card style={{ border: `2px solid ${B.purple}` }}>
@@ -606,7 +604,7 @@ const duplicar = async (g) => {
         </Card>
       )}
 
-      {/* EDITOR (fijo arriba cuando está activo, siempre visible) */}
+      {/* EDITOR (siempre arriba cuando está activo) */}
       {editState && (
         <div>
           <div style={{
