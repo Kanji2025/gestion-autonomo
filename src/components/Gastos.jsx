@@ -272,7 +272,6 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
   };
 
 const duplicar = async (g) => {
-    alert("A: inicio - id=" + (g?.id || "NULO"));
     try {
       const copia = {
         "Concepto": g.fields["Concepto"] || "Gasto",
@@ -284,22 +283,12 @@ const duplicar = async (g) => {
       if (g.fields["Tipo de Gasto"]) copia["Tipo de Gasto"] = g.fields["Tipo de Gasto"];
       if (g.fields["Periodicidad"]) copia["Periodicidad"] = g.fields["Periodicidad"];
 
-      alert("B: copia construida");
-
-      const created = await createRecord("Gastos", copia);
-      alert("C: createRecord OK");
-
-      const nuevoId = created.records?.[0]?.id;
-      alert("D: nuevoId=" + (nuevoId || "NULO"));
-
-      if (!nuevoId) {
-        alert("X: sin nuevoId, salgo");
-        return;
-      }
-
-      alert("E: voy a llamar setEditState");
+      // PASO 1: Abrir el editor PRIMERO con id temporal
+      // Así no hay riesgo de que un re-render lo borre durante el await
+      const idTemporal = "temp-" + Date.now();
       setEditState({
-        id: nuevoId,
+        id: idTemporal,
+        isTemp: true,
         form: {
           concepto: copia["Concepto"],
           fecha: copia["Fecha"],
@@ -310,7 +299,30 @@ const duplicar = async (g) => {
           period: copia["Periodicidad"] || ""
         }
       });
-      alert("F: setEditState llamado");
+
+      // PASO 2: Crear el registro en segundo plano
+      const created = await createRecord("Gastos", copia);
+      const nuevoId = created.records?.[0]?.id;
+
+      if (!nuevoId) {
+        alert("Se creó el editor pero falló el guardado en Airtable");
+        return;
+      }
+
+      // PASO 3: Actualizar el id real (manteniendo el form)
+      setEditState(prev => prev && prev.isTemp ? {
+        ...prev,
+        id: nuevoId,
+        isTemp: false
+      } : prev);
+
+      // Refresh en segundo plano
+      onRefresh();
+    } catch (e) {
+      console.error("Duplicar error:", e);
+      alert("Error al duplicar: " + (e.message || "desconocido"));
+    }
+  };
 
 // onRefresh();  // <-- DESACTIVADO TEMPORALMENTE para diagnóstico
       alert("G: SIN onRefresh, fin de la función");
