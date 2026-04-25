@@ -271,8 +271,8 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
     });
   };
 
- const duplicar = async (g) => {
-    alert("FUNCION DUPLICAR EJECUTADA. ID: " + (g?.id || "SIN ID"));
+const duplicar = async (g) => {
+    alert("A: inicio - id=" + (g?.id || "NULO"));
     try {
       const copia = {
         "Concepto": g.fields["Concepto"] || "Gasto",
@@ -284,11 +284,20 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
       if (g.fields["Tipo de Gasto"]) copia["Tipo de Gasto"] = g.fields["Tipo de Gasto"];
       if (g.fields["Periodicidad"]) copia["Periodicidad"] = g.fields["Periodicidad"];
 
-      const created = await createRecord("Gastos", copia);
-      const nuevoId = created.records?.[0]?.id;
-      if (!nuevoId) { alert("No se pudo crear la copia"); return; }
+      alert("B: copia construida");
 
-      // Poner el editor en modo edición con los datos de la copia
+      const created = await createRecord("Gastos", copia);
+      alert("C: createRecord OK");
+
+      const nuevoId = created.records?.[0]?.id;
+      alert("D: nuevoId=" + (nuevoId || "NULO"));
+
+      if (!nuevoId) {
+        alert("X: sin nuevoId, salgo");
+        return;
+      }
+
+      alert("E: voy a llamar setEditState");
       setEditState({
         id: nuevoId,
         form: {
@@ -301,12 +310,12 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
           period: copia["Periodicidad"] || ""
         }
       });
+      alert("F: setEditState llamado");
 
-      // Refresh en segundo plano (no bloqueamos, no afecta al state de edición)
       onRefresh();
-} catch (e) {
-      console.error("Duplicar error:", e);
-      alert("ERROR DUPLICAR DETECTADO:\n\nMensaje: " + (e.message || "sin mensaje") + "\n\nStack: " + (e.stack || "sin stack").substring(0, 500));
+      alert("G: onRefresh lanzado, fin de la función");
+    } catch (e) {
+      alert("CATCH: " + (e?.message || JSON.stringify(e) || "error sin mensaje"));
     }
   };
 
