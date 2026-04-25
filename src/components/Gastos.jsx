@@ -303,9 +303,9 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
 
       // Refresh en segundo plano (no bloqueamos, no afecta al state de edición)
       onRefresh();
-    } catch (e) {
+} catch (e) {
       console.error("Duplicar error:", e);
-      alert("Error al duplicar: " + e.message);
+      alert("ERROR DUPLICAR DETECTADO:\n\nMensaje: " + (e.message || "sin mensaje") + "\n\nStack: " + (e.stack || "sin stack").substring(0, 500));
     }
   };
 
