@@ -312,8 +312,8 @@ const duplicar = async (g) => {
       });
       alert("F: setEditState llamado");
 
-      onRefresh();
-      alert("G: onRefresh lanzado, fin de la función");
+// onRefresh();  // <-- DESACTIVADO TEMPORALMENTE para diagnóstico
+      alert("G: SIN onRefresh, fin de la función");
     } catch (e) {
       alert("CATCH: " + (e?.message || JSON.stringify(e) || "error sin mensaje"));
     }
