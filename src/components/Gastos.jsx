@@ -487,7 +487,17 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
       />
 
       <FilterBar filtro={filtro} setFiltro={setFiltro} />
-
+{/* PRUEBA DE DIAGNÓSTICO - si ves este cuadro rojo, editState funciona */}
+      <div style={{
+        background: "red",
+        color: "white",
+        padding: 20,
+        fontSize: 24,
+        fontWeight: 700,
+        border: "5px solid yellow"
+      }}>
+        DEBUG — editState es: {editState ? `ACTIVO (id: ${editState.id})` : "NULL"}
+      </div>
       {/* FORMULARIO MANUAL */}
       {showFManual && (
         <Card style={{ border: `2px solid ${B.purple}` }}>
