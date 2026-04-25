@@ -271,7 +271,8 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
     });
   };
 
-  const duplicar = async (g) => {
+ const duplicar = async (g) => {
+    alert("FUNCION DUPLICAR EJECUTADA. ID: " + (g?.id || "SIN ID"));
     try {
       const copia = {
         "Concepto": g.fields["Concepto"] || "Gasto",
