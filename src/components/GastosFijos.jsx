@@ -264,14 +264,14 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
                 ≈ {fmt(importeMensual)}/mes
               </div>
             )}
-            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-              <button onClick={() => startEdit(gf)} style={iconBtnStyle(B.text)}>
+<div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+              <button onClick={() => startEdit(gf)} style={iconBtnStyle(B.text)} title="Editar">
                 ✏️
               </button>
               {esActivo ? (
                 <button
                   onClick={() => setBajaModal({ id: gf.id, nombre: gf.fields["Nombre"] || gf.fields["Proveedor"], accion: "baja" })}
-                  style={iconBtnStyle(B.red)}
+                  style={iconBtnStyle(B.amber)}
                   title="Dar de baja"
                 >
                   ⏸
@@ -285,6 +285,13 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
                   ▶
                 </button>
               )}
+              <button
+                onClick={() => borrarPermanentemente(gf)}
+                style={iconBtnStyle(B.red)}
+                title="Borrar permanentemente"
+              >
+                🗑
+              </button>
             </div>
           </div>
         </div>
