@@ -225,6 +225,16 @@ const fields = {
               gap: 6,
               flexWrap: "wrap"
             }}>
+             {(() => {
+                const tipo = gf.fields["Tipo"] || "Deducible";
+                const tipoColor = tipo === "Deducible" ? B.green : tipo === "Cuota SS" ? "#3b82f6" : B.red;
+                const tipoIcon = tipo === "Deducible" ? "🟢" : tipo === "Cuota SS" ? "🔵" : "🔴";
+                return (
+                  <div style={chipStyle(tipoColor)}>
+                    {tipoIcon} <strong>{tipo}</strong>
+                  </div>
+                );
+              })()}
               <div style={chipStyle(B.purple)}>
                 💰 Importe medio: <strong>{fmt(stats.importeMedio)}</strong>
               </div>
@@ -240,7 +250,6 @@ const fields = {
                 </div>
               )}
             </div>
-
             {notas && (
               <div style={{
                 marginTop: 8,
