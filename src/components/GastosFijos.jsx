@@ -60,7 +60,7 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
   // ============================================================
   // EDICIÓN
   // ============================================================
-  const startEdit = (gf) => {
+const startEdit = (gf) => {
     setErr("");
     setEditId(gf.id);
     setEditForm({
@@ -70,7 +70,8 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
       periodicidad: gf.fields["Periodicidad"] || "Mensual",
       importe: String(gf.fields["Importe Medio"] || ""),
       moneda: gf.fields["Moneda"] || "EUR",
-      notas: gf.fields["Notas"] || ""
+      notas: gf.fields["Notas"] || "",
+      tipo: gf.fields["Tipo"] || "Deducible"
     });
     setTimeout(() => window.scrollTo({ top: 0, behavior: "smooth" }), 50);
   };
