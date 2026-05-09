@@ -1,12 +1,13 @@
 // src/components/CuotaAut.jsx
 // Calcula tu rendimiento neto mensual y compara con el tramo de cotización correcto.
+// Solo cuenta gastos DEDUCIBLES + Cuota SS. Excluye No deducibles (aplazamientos, IVA fraccionado, multas).
 
 import { useState } from "react";
 import { B, fmt } from "../utils.js";
 import { useResponsive } from "../hooks/useResponsive.js";
 import { Card, Lbl, SectionHeader } from "./UI.jsx";
 
-export default function CuotaAut({ ingresos, gastos, tramos }) {
+export default function CuotaAut({ ingresos, gastos, gastosFijos, tramos }) {
   const { isMobile } = useResponsive();
 
   const [ca, setCa] = useState(() => {
@@ -14,15 +15,39 @@ export default function CuotaAut({ ingresos, gastos, tramos }) {
     catch { return 294; }
   });
 
+  // ============================================================
+  // CÁLCULO DEL RENDIMIENTO NETO (fiscalmente correcto)
+  // ============================================================
+  // Solo restan los gastos DEDUCIBLES y la CUOTA SS.
+  // Los NO DEDUCIBLES (IVA fraccionado, aplazamientos, multas) NO restan
+  // porque son deuda histórica, no operación corriente.
+
+  // 1. Identificar IDs de gastos fijos NO deducibles
+  const gastosFijosNoDeducibles = (gastosFijos || []).filter(gf =>
+    gf.fields["Tipo"] === "No deducible"
+  );
+  const idsNoDeducibles = new Set();
+  gastosFijosNoDeducibles.forEach(gf => {
+    const links = gf.fields["Gastos"] || [];
+    links.forEach(id => idsNoDeducibles.add(id));
+  });
+
+  // 2. Sumar ingresos
   const tI = ingresos.reduce((s, r) => s + (r.fields["Base Imponible"] || 0), 0);
-  const tG = gastos.reduce((s, r) => s + (r.fields["Base Imponible"] || 0), 0);
+
+  // 3. Sumar gastos deducibles (TODOS los gastos EXCEPTO los enlazados a Gastos Fijos No deducibles)
+  const tGdeducibles = gastos.reduce((s, r) => {
+    if (idsNoDeducibles.has(r.id)) return s; // saltar No deducibles
+    return s + (r.fields["Base Imponible"] || 0);
+  }, 0);
+
+  // 4. Calcular meses transcurridos
   const ms = Math.max(new Date().getMonth() + 1, 1);
 
-  // Rendimiento neto mensual = (Ingresos - Gastos - Cuotas pagadas) * 0.93 / meses transcurridos
-  // El 0.93 es para deducir el 7% por gastos genéricos
-  const rn = ((tI - tG - (ca * ms)) * 0.93) / ms;
+  // 5. Rendimiento neto mensual = (Ingresos - Gastos Deducibles - Cuotas SS pagadas) × 0.93 / meses
+  const rn = ((tI - tGdeducibles - (ca * ms)) * 0.93) / ms;
 
-  // Procesar la tabla de tramos desde Airtable, soportando ambas variantes de nombres
+  // Procesar tramos
   const td = tramos.map(r => ({
     tramo: r.fields["Tramo"] || 0,
     min: r.fields["Rend. Neto Mín"] || r.fields["Rend Neto Min"] || 0,
@@ -30,7 +55,6 @@ export default function CuotaAut({ ingresos, gastos, tramos }) {
     cuota: r.fields["Cuota Mínima"] || r.fields["Cuota Minima"] || 0
   })).sort((a, b) => a.tramo - b.tramo);
 
-  // Lógica corregida: si negativo o bajo, tramo 1
   const tr = rn <= 0
     ? (td[0] || { tramo: 1, min: 0, max: 670, cuota: 200 })
     : (td.find(t => rn >= t.min && rn < t.max) || td[0] || { tramo: 1, min: 0, max: 670, cuota: 200 });
@@ -41,6 +65,9 @@ export default function CuotaAut({ ingresos, gastos, tramos }) {
     setCa(v);
     try { localStorage.setItem("ga_cuota", v); } catch {}
   };
+
+  // Para mostrar transparencia: cuántos gastos no deducibles hay excluidos
+  const numNoDed = idsNoDeducibles.size;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
@@ -101,9 +128,21 @@ export default function CuotaAut({ ingresos, gastos, tramos }) {
             <div style={{ fontWeight: 700 }}>{fmt(tr.min)} - {fmt(tr.max)}</div>
           </div>
         </div>
+        {numNoDed > 0 && (
+          <div style={{
+            marginTop: 14,
+            padding: "8px 12px",
+            background: "rgba(255,255,255,0.08)",
+            borderRadius: 6,
+            fontSize: 11,
+            color: "rgba(255,255,255,0.7)",
+            fontFamily: B.tS
+          }}>
+            ℹ️ Excluyendo {numNoDed} {numNoDed === 1 ? "gasto" : "gastos"} no deducibles (IVA fraccionado, aplazamientos, multas).
+          </div>
+        )}
       </div>
 
-      {/* Aviso comparativo */}
       {d !== 0 && (
         <div style={{
           background: d > 0 ? "#fef2f2" : "#f0fdf4",
@@ -140,7 +179,6 @@ export default function CuotaAut({ ingresos, gastos, tramos }) {
         </div>
       )}
 
-      {/* Tabla de tramos */}
       {td.length > 0 && (
         <Card>
           <Lbl>Tramos 2026</Lbl>
