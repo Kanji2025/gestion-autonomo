@@ -129,6 +129,7 @@ export const MENU = [
   { id: "facturas", label: "FACTURAS" },
   { id: "clientes", label: "CLIENTES" },
   { id: "gastos", label: "GASTOS" },
+  { id: "gastosfijos", label: "GASTOS FIJOS" },
   { id: "alertas", label: "ALERTAS" },
   { id: "simulador", label: "SIMULADOR" },
   { id: "autonomo", label: "CUOTA AUTÓNOMOS" }
