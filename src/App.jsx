@@ -347,11 +347,12 @@ const [i, g, c, t, a, gf] = await Promise.all([
         return (
           <GastosView
             gastos={gastos}
+            gastosFijos={gastosFijos}
             onRefresh={load}
             filtro={filtro}
             setFiltro={setFiltro}
           />
-       );
+        );
       case "gastosfijos":
         return (
           <GastosFijos
