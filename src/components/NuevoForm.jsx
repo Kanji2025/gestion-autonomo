@@ -1,8 +1,8 @@
 // src/components/NuevoForm.jsx
 // Formulario universal para añadir Factura (ingreso) o Ticket/Gasto.
-// Para gastos: permite marcar "es gasto fijo recurrente" y gestiona alta/duplicados.
+// Para gastos: detección automática de Gasto Fijo por proveedor (mismo flujo que alta manual).
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { B, hoy, convD } from "../utils.js";
 import { useResponsive } from "../hooks/useResponsive.js";
 import {
@@ -184,27 +184,56 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
   const [fechaV, sFechaV] = useState("");
   const [fechaC, sFechaC] = useState("");
   const [concepto, sConcepto] = useState("");
-  const [tipoG, sTipoG] = useState("");
-  const [period, sPeriod] = useState("Puntual");
   const [irpfG, sIrpfG] = useState("");
   const [proveedor, sProveedor] = useState("");
 
-  // Campos para Gasto Fijo
-  const [esFijo, setEsFijo] = useState(false);
+  // Estado de detección automática (solo para gastos)
+  const [detectado, setDetectado] = useState(null);
+  const [buscandoProv, setBuscandoProv] = useState(false);
+
+  // Casos de Gasto Fijo
+  const [altaComoFijo, setAltaComoFijo] = useState(false);
+  const [esPuntual, setEsPuntual] = useState(false);
   const [periodFijo, setPeriodFijo] = useState("Mensual");
   const [monedaFijo, setMonedaFijo] = useState("EUR");
-
-  // Modal de duplicado
-  const [duplicadoModal, setDuplicadoModal] = useState(null);
 
   const reset = () => {
     sNumero(""); sFecha(hoy()); sCliente(""); sCif(""); sBase(""); sIva("");
     sIrpf(""); sTotal(""); sDesc(""); sEstado("Pendiente"); sFechaV(""); sFechaC("");
-    sConcepto(""); sTipoG(""); sPeriod("Puntual"); sIrpfG(""); sProveedor("");
-    setEsFijo(false); setPeriodFijo("Mensual"); setMonedaFijo("EUR");
-    setDuplicadoModal(null);
+    sConcepto(""); sIrpfG(""); sProveedor("");
+    setDetectado(null); setBuscandoProv(false);
+    setAltaComoFijo(false); setEsPuntual(false);
+    setPeriodFijo("Mensual"); setMonedaFijo("EUR");
     setSaved(false); setErr(""); setRes(null);
   };
+
+  // ============================================================
+  // DETECCIÓN AUTOMÁTICA DEL PROVEEDOR (solo para gastos)
+  // ============================================================
+  useEffect(() => {
+    if (tipo !== "gasto") return;
+    const prov = proveedor.trim();
+    if (!prov) {
+      setDetectado(null);
+      return;
+    }
+    setBuscandoProv(true);
+    const timer = setTimeout(async () => {
+      try {
+        const found = await findGastoFijoByProveedor(prov);
+        if (found) {
+          setDetectado({ existe: true, gastoFijo: found });
+        } else {
+          setDetectado({ existe: false });
+        }
+      } catch (e) {
+        console.warn("Error buscando proveedor:", e);
+        setDetectado(null);
+      }
+      setBuscandoProv(false);
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [proveedor, tipo]);
 
   const handleFile = async (file) => {
     reset();
@@ -263,12 +292,9 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
         if (data.irpf != null) sIrpfG(String(data.irpf));
         if (data.total != null) sTotal(String(data.total));
         if (data.concepto) sConcepto(data.concepto);
-        if (data.tipo_sugerido) sTipoG(data.tipo_sugerido);
-        if (data.periodicidad_sugerida) {
-          sPeriod(data.periodicidad_sugerida);
-          if (["Mensual", "Trimestral", "Anual"].includes(data.periodicidad_sugerida)) {
-            setPeriodFijo(data.periodicidad_sugerida);
-          }
+        // Si la IA sugiere periodicidad recurrente, la guardamos para el alta como fijo
+        if (data.periodicidad_sugerida && ["Mensual", "Trimestral", "Anual"].includes(data.periodicidad_sugerida)) {
+          setPeriodFijo(data.periodicidad_sugerida);
         }
       }
     } catch (e) {
@@ -280,61 +306,8 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
   };
 
   // ============================================================
-  // GUARDAR GASTO (con lógica de gasto fijo)
+  // GUARDAR (mismo flujo que alta manual de Gastos.jsx)
   // ============================================================
-  const guardarGasto = async () => {
-    // Paso 1: crear el gasto individual en tabla Gastos
-    const f = {
-      "Concepto": concepto || desc || proveedor || "Gasto",
-      "Base Imponible": Number(base) || 0,
-      "IVA Soportado (€)": iva && iva !== "" ? Number(iva) : 0
-    };
-    if (irpfG) f["IRPF Retenido (€)"] = Number(irpfG);
-    if (fecha) f["Fecha"] = fecha;
-    if (tipoG) f["Tipo de Gasto"] = tipoG;
-    if (period) f["Periodicidad"] = period;
-
-    const created = await createRecord("Gastos", f);
-    const nuevoGastoId = created.records?.[0]?.id;
-
-    // Paso 2: si es gasto fijo, gestionar alta/duplicado
-    if (esFijo && proveedor && proveedor.trim()) {
-      const existente = await findGastoFijoByProveedor(proveedor.trim());
-
-      if (existente) {
-        // Ya existe → mostrar modal al usuario
-        setDuplicadoModal({
-          existente,
-          nuevoGastoId,
-          proveedor: proveedor.trim()
-        });
-        // Importante: NO terminar el save aquí. El modal gestiona el siguiente paso.
-        return false; // indica que no hemos terminado, falta decisión del usuario
-      }
-
-      // No existe → crear nuevo Gasto Fijo y enlazar
-      try {
-        const nuevoFijoId = await createGastoFijo({
-          nombre: proveedor.trim(),
-          proveedor: proveedor.trim(),
-          cifProveedor: cif,
-          periodicidad: periodFijo,
-          importe: Number(base) + (Number(iva) || 0),
-          moneda: monedaFijo,
-          fechaAlta: fecha || hoy()
-        });
-        if (nuevoFijoId && nuevoGastoId) {
-          await linkGastoToGastoFijo(nuevoGastoId, nuevoFijoId);
-        }
-      } catch (e) {
-        console.warn("Gasto guardado pero no se pudo crear el Gasto Fijo:", e);
-        // No bloqueamos: el gasto ya está guardado
-      }
-    }
-
-    return true; // guardado completo
-  };
-
   const handleSave = async () => {
     setSav(true);
     setErr("");
@@ -360,66 +333,68 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
         setSaved(true);
         onSaved();
       } else {
-        // Gasto
-        const completo = await guardarGasto();
-        if (completo) {
-          setSaved(true);
-          onSaved();
+        // GASTO con detección automática
+        if (altaComoFijo && !proveedor.trim()) {
+          setErr("Para dar de alta un Gasto Fijo necesitas rellenar el Proveedor");
+          setSav(false);
+          return;
         }
-        // si completo es false, hay modal de duplicado abierto → no marcamos saved aún
+
+        const f = {
+          "Concepto": concepto || desc || proveedor || "Gasto",
+          "Base Imponible": Number(base) || 0,
+          "IVA Soportado (€)": iva && iva !== "" ? Number(iva) : 0
+        };
+        if (irpfG) f["IRPF Retenido (€)"] = Number(irpfG);
+        if (fecha) f["Fecha"] = fecha;
+
+        // Heredar Periodicidad para que aparezca en lista de Fijos
+        if (detectado?.existe && !esPuntual && detectado.gastoFijo.fields["Periodicidad"]) {
+          f["Periodicidad"] = detectado.gastoFijo.fields["Periodicidad"];
+        } else if (detectado?.existe === false && altaComoFijo) {
+          f["Periodicidad"] = periodFijo;
+        }
+
+        const created = await createRecord("Gastos", f);
+        const nuevoGastoId = created.records?.[0]?.id;
+
+        const provLimpio = proveedor.trim();
+
+        if (provLimpio && nuevoGastoId) {
+          if (detectado?.existe && !esPuntual) {
+            // CASO A: ya existe → enlazar automáticamente
+            await linkGastoToGastoFijo(nuevoGastoId, detectado.gastoFijo.id);
+          } else if (detectado?.existe === false && altaComoFijo) {
+            // CASO B: no existe y se da de alta → crear y enlazar
+            try {
+              const nuevoFijoId = await createGastoFijo({
+                nombre: provLimpio,
+                proveedor: provLimpio,
+                cifProveedor: cif,
+                periodicidad: periodFijo,
+                importe: Number(base) + (Number(iva) || 0),
+                moneda: monedaFijo,
+                fechaAlta: fecha || hoy()
+              });
+              if (nuevoFijoId) {
+                await linkGastoToGastoFijo(nuevoGastoId, nuevoFijoId);
+              }
+            } catch (e) {
+              console.warn("Gasto guardado pero no se pudo crear el Gasto Fijo:", e);
+            }
+          }
+          // CASO C (existe + esPuntual): no enlazar → queda como puntual
+          // CASO D (no existe + no altaComoFijo): gasto suelto puntual
+        }
+
+        setSaved(true);
+        onSaved();
       }
     } catch (e) {
       console.error(e);
       setErr("Error al guardar: " + e.message);
     }
     setSav(false);
-  };
-
-  // ============================================================
-  // ACCIONES DEL MODAL DE DUPLICADO
-  // ============================================================
-  const enlazarAExistente = async () => {
-    const { existente, nuevoGastoId } = duplicadoModal;
-    try {
-      if (nuevoGastoId && existente?.id) {
-        await linkGastoToGastoFijo(nuevoGastoId, existente.id);
-      }
-      setDuplicadoModal(null);
-      setSaved(true);
-      onSaved();
-    } catch (e) {
-      alert("Error al enlazar: " + e.message);
-    }
-  };
-
-  const crearDuplicado = async () => {
-    const { nuevoGastoId } = duplicadoModal;
-    try {
-      const nuevoFijoId = await createGastoFijo({
-        nombre: proveedor.trim() + " (2)",
-        proveedor: proveedor.trim(),
-        cifProveedor: cif,
-        periodicidad: periodFijo,
-        importe: Number(base) + (Number(iva) || 0),
-        moneda: monedaFijo,
-        fechaAlta: fecha || hoy()
-      });
-      if (nuevoFijoId && nuevoGastoId) {
-        await linkGastoToGastoFijo(nuevoGastoId, nuevoFijoId);
-      }
-      setDuplicadoModal(null);
-      setSaved(true);
-      onSaved();
-    } catch (e) {
-      alert("Error al crear: " + e.message);
-    }
-  };
-
-  const cancelarGastoFijo = () => {
-    // El gasto ya se creó, solo no enlazamos a ningún gasto fijo
-    setDuplicadoModal(null);
-    setSaved(true);
-    onSaved();
   };
 
   const ready = (mode === "ocr" && res && !proc) || mode === "manual";
@@ -594,92 +569,128 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
                 gap: 14,
                 marginTop: 14
               }}>
-                <Inp label="Concepto" value={concepto} onChange={sConcepto} ph="Ej: Material oficina" />
-                <Inp label="Proveedor" value={proveedor} onChange={sProveedor} ph="Empresa" />
+                <Inp label="Concepto" value={concepto} onChange={sConcepto} ph="Ej: Suscripción Canva" />
+                <Inp
+                  label="Proveedor"
+                  value={proveedor}
+                  onChange={v => { sProveedor(v); setAltaComoFijo(false); setEsPuntual(false); }}
+                  ph="Empresa"
+                />
                 <Inp label="Fecha" value={fecha} onChange={sFecha} type="date" />
                 <Inp label="CIF Proveedor" value={cif} onChange={sCif} ph="B12345678" />
                 <Inp label="Base Imponible (€)" value={base} onChange={sBase} type="number" ph="0" />
                 <Inp label="IVA Soportado (€)" value={iva} onChange={sIva} type="number" ph="0 si no lleva IVA" />
                 <Inp label="IRPF Retenido (€)" value={irpfG} onChange={sIrpfG} type="number" ph="Si proveedor autónomo" />
-                <Sel label="Tipo de Gasto" value={tipoG} onChange={sTipoG} options={["Fijo", "Variable", "Impuesto"]} />
-                <Sel label="Periodicidad" value={period} onChange={sPeriod} options={["Mensual", "Trimestral", "Anual", "Puntual"]} />
               </div>
 
-              {/* TOGGLE "¿Es un gasto fijo recurrente?" */}
-              <div style={{
-                marginTop: 18,
-                padding: 14,
-                background: esFijo ? B.purple + "10" : "rgba(0,0,0,0.03)",
-                border: `2px solid ${esFijo ? B.purple : B.border}`,
-                borderRadius: 10,
-                transition: "all 0.2s ease"
-              }}>
-                <label style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  cursor: "pointer",
-                  userSelect: "none"
-                }}>
-                  <input
-                    type="checkbox"
-                    checked={esFijo}
-                    onChange={e => setEsFijo(e.target.checked)}
-                    style={{
-                      width: 20,
-                      height: 20,
-                      accentColor: B.purple,
-                      cursor: "pointer"
-                    }}
-                  />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 700, fontSize: 14, fontFamily: B.tS }}>
-                      🔄 ¿Es un gasto fijo recurrente?
+              {/* DETECCIÓN AUTOMÁTICA DE GASTO FIJO */}
+              {proveedor.trim() && (
+                <div style={{ marginTop: 18 }}>
+                  {/* CASO: buscando */}
+                  {buscandoProv && (
+                    <div style={{
+                      padding: "10px 14px",
+                      background: "rgba(0,0,0,0.04)",
+                      borderRadius: 8,
+                      fontSize: 12,
+                      color: B.muted,
+                      fontFamily: B.tS
+                    }}>
+                      🔍 Comprobando si «{proveedor.trim()}» ya está registrado como Gasto Fijo...
                     </div>
-                    <div style={{ fontSize: 12, color: B.muted, marginTop: 2 }}>
-                      Marca esta opción si se trata de una suscripción o pago periódico (ChatGPT, Canva, seguro, etc.)
-                    </div>
-                  </div>
-                </label>
+                  )}
 
-                {esFijo && (
-                  <div style={{
-                    marginTop: 14,
-                    display: "grid",
-                    gridTemplateColumns: `repeat(${Math.min(formColumns, 2)}, 1fr)`,
-                    gap: 12,
-                    paddingTop: 14,
-                    borderTop: `1px solid ${B.border}`
-                  }}>
-                    <Sel
-                      label="Periodicidad del Fijo"
-                      value={periodFijo}
-                      onChange={setPeriodFijo}
-                      options={["Mensual", "Trimestral", "Anual"]}
-                    />
-                    <Sel
-                      label="Moneda del cargo"
-                      value={monedaFijo}
-                      onChange={setMonedaFijo}
-                      options={["EUR", "USD", "GBP"]}
-                    />
-                    {!proveedor && (
+                  {/* CASO A: ya existe */}
+                  {!buscandoProv && detectado?.existe && (
+                    <div style={{
+                      padding: 14,
+                      background: esPuntual ? "rgba(0,0,0,0.03)" : B.green + "12",
+                      border: `2px solid ${esPuntual ? B.border : B.green}`,
+                      borderRadius: 10,
+                      transition: "all 0.2s ease"
+                    }}>
                       <div style={{
-                        gridColumn: "1 / -1",
-                        padding: "8px 12px",
-                        background: B.amber + "15",
-                        color: B.amber,
-                        borderRadius: 6,
-                        fontSize: 11,
-                        fontWeight: 600,
-                        fontFamily: B.tS
+                        fontSize: 13,
+                        fontWeight: 700,
+                        fontFamily: B.tS,
+                        color: esPuntual ? B.muted : "#0d6b3a",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        flexWrap: "wrap"
                       }}>
-                        ⚠️ Rellena el campo "Proveedor" arriba para identificar este gasto fijo
+                        {esPuntual ? "❌" : "🔗"} {esPuntual
+                          ? `Este pago se guardará como puntual (no enlazado a «${detectado.gastoFijo.fields["Nombre"] || detectado.gastoFijo.fields["Proveedor"]}»)`
+                          : `Se enlazará automáticamente al Gasto Fijo «${detectado.gastoFijo.fields["Nombre"] || detectado.gastoFijo.fields["Proveedor"]}»`}
                       </div>
-                    )}
-                  </div>
-                )}
-              </div>
+                      <label style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        marginTop: 12,
+                        cursor: "pointer",
+                        userSelect: "none"
+                      }}>
+                        <input
+                          type="checkbox"
+                          checked={esPuntual}
+                          onChange={e => setEsPuntual(e.target.checked)}
+                          style={{ width: 18, height: 18, accentColor: B.amber, cursor: "pointer" }}
+                        />
+                        <span style={{ fontSize: 13, fontWeight: 600, fontFamily: B.tS, color: B.text }}>
+                          Este pago es puntual (no contar como Gasto Fijo)
+                        </span>
+                      </label>
+                      <div style={{ fontSize: 11, color: B.muted, marginTop: 4, paddingLeft: 28 }}>
+                        Marca esto si el proveedor coincide pero este gasto NO es del recurrente
+                        (ej: compra adicional fuera de la cuota habitual).
+                      </div>
+                    </div>
+                  )}
+
+                  {/* CASO B: no existe → ofrecer dar de alta */}
+                  {!buscandoProv && detectado?.existe === false && (
+                    <div style={{
+                      padding: 14,
+                      background: altaComoFijo ? B.purple + "10" : "rgba(0,0,0,0.03)",
+                      border: `2px solid ${altaComoFijo ? B.purple : B.border}`,
+                      borderRadius: 10,
+                      transition: "all 0.2s ease"
+                    }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", userSelect: "none" }}>
+                        <input
+                          type="checkbox"
+                          checked={altaComoFijo}
+                          onChange={e => setAltaComoFijo(e.target.checked)}
+                          style={{ width: 20, height: 20, accentColor: B.purple, cursor: "pointer" }}
+                        />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 700, fontSize: 14, fontFamily: B.tS }}>
+                            ➕ Dar de alta «{proveedor.trim()}» como Gasto Fijo
+                          </div>
+                          <div style={{ fontSize: 12, color: B.muted, marginTop: 2 }}>
+                            A partir de ahora, los pagos de este proveedor se enlazarán automáticamente.
+                          </div>
+                        </div>
+                      </label>
+
+                      {altaComoFijo && (
+                        <div style={{
+                          marginTop: 14,
+                          display: "grid",
+                          gridTemplateColumns: `repeat(${Math.min(formColumns, 2)}, 1fr)`,
+                          gap: 12,
+                          paddingTop: 14,
+                          borderTop: `1px solid ${B.border}`
+                        }}>
+                          <Sel label="Periodicidad" value={periodFijo} onChange={setPeriodFijo} options={["Mensual", "Trimestral", "Anual"]} />
+                          <Sel label="Moneda" value={monedaFijo} onChange={setMonedaFijo} options={["EUR", "USD", "GBP"]} />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           )}
 
@@ -699,12 +710,12 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
 
           <button
             onClick={handleSave}
-            disabled={sav || (esFijo && tipo === "gasto" && !proveedor.trim())}
+            disabled={sav}
             style={{
               ...B.btn,
               width: "100%",
               marginTop: 16,
-              opacity: (sav || (esFijo && tipo === "gasto" && !proveedor.trim())) ? 0.5 : 1
+              opacity: sav ? 0.5 : 1
             }}
           >
             {sav ? "GUARDANDO..." : tipo === "ingreso" ? "GUARDAR FACTURA" : "GUARDAR GASTO"}
@@ -734,90 +745,6 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
             </div>
           </div>
         </Card>
-      )}
-
-      {/* MODAL DE DUPLICADO */}
-      {duplicadoModal && (
-        <div style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: "rgba(0,0,0,0.55)",
-          backdropFilter: "blur(3px)",
-          zIndex: 300,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: 16
-        }}>
-          <div style={{
-            background: "#fff",
-            borderRadius: 12,
-            padding: 24,
-            maxWidth: 480,
-            width: "100%",
-            boxShadow: "0 20px 60px rgba(0,0,0,0.3)"
-          }}>
-            <div style={{ fontSize: 32, marginBottom: 10 }}>⚠️</div>
-            <div style={{
-              fontSize: 16,
-              fontWeight: 700,
-              fontFamily: B.tS,
-              marginBottom: 10
-            }}>
-              Ya existe un gasto fijo para «{duplicadoModal.proveedor}»
-            </div>
-            <div style={{
-              fontSize: 13,
-              color: B.muted,
-              marginBottom: 20,
-              lineHeight: 1.5
-            }}>
-              Tienes registrado un Gasto Fijo con este proveedor
-              ({duplicadoModal.existente.fields["Activa"] === "Sí" ? "activo" : "dado de baja"}).
-              El gasto ya se ha guardado correctamente. ¿Qué quieres hacer con la parte del Gasto Fijo?
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <button
-                onClick={enlazarAExistente}
-                style={{
-                  ...B.btn,
-                  background: B.green,
-                  width: "100%"
-                }}
-              >
-                ✅ ENLAZAR AL GASTO FIJO EXISTENTE
-              </button>
-              <button
-                onClick={crearDuplicado}
-                style={{
-                  ...B.btn,
-                  background: "transparent",
-                  color: B.purple,
-                  border: `2px solid ${B.purple}`,
-                  width: "100%"
-                }}
-              >
-                ➕ CREAR UNO NUEVO (duplicado)
-              </button>
-              <button
-                onClick={cancelarGastoFijo}
-                style={{
-                  ...B.btn,
-                  background: "transparent",
-                  color: B.muted,
-                  border: `1px solid ${B.border}`,
-                  width: "100%"
-                }}
-              >
-                NO ENLAZAR A NINGUNO
-              </button>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );
