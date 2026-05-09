@@ -6,7 +6,7 @@
 import { useState } from "react";
 import { B, fmt, hoy } from "../utils.js";
 import { useResponsive } from "../hooks/useResponsive.js";
-import { updateRecord } from "../api.js";
+import { updateRecord, deleteRecord } from "../api.js";
 import { Card, Lbl, Inp, Sel, SectionHeader, ErrorBox } from "./UI.jsx";
 
 const PERIODICIDADES = ["Mensual", "Trimestral", "Anual"];
