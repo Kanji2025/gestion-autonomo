@@ -307,7 +307,7 @@ const fields = {
       <Card style={{ border: `2px solid ${B.purple}` }}>
         <Lbl><span style={{ color: B.purple }}>EDITAR GASTO FIJO</span></Lbl>
         <ErrorBox>{err}</ErrorBox>
-        <div style={{
+       <div style={{
           display: "grid",
           gridTemplateColumns: `repeat(${formColumns}, 1fr)`,
           gap: 14,
@@ -319,6 +319,7 @@ const fields = {
           <Inp label="Importe Medio" value={editForm.importe} onChange={v => updateField("importe", v)} type="number" />
           <Sel label="Periodicidad" value={editForm.periodicidad} onChange={v => updateField("periodicidad", v)} options={PERIODICIDADES} />
           <Sel label="Moneda" value={editForm.moneda} onChange={v => updateField("moneda", v)} options={MONEDAS} />
+          <Sel label="Tipo Fiscal" value={editForm.tipo} onChange={v => updateField("tipo", v)} options={["Deducible", "Cuota SS", "No deducible"]} />
         </div>
         <div style={{ marginTop: 14 }}>
           <label style={{
