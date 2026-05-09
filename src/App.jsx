@@ -17,6 +17,7 @@ import Dashboard from "./components/Dashboard.jsx";
 import FacturasView from "./components/Facturas.jsx";
 import Clientes from "./components/Clientes.jsx";
 import GastosView from "./components/Gastos.jsx";
+import GastosFijos from "./components/GastosFijos.jsx";
 import Simulador from "./components/Simulador.jsx";
 import CuotaAut from "./components/CuotaAut.jsx";
 import AlertasView, {
@@ -131,6 +132,7 @@ export default function App() {
 
   const [ingresos, setI] = useState([]);
   const [gastos, setG] = useState([]);
+  const [gastosFijos, setGF] = useState([]);
   const [clientes, setC] = useState([]);
   const [tramos, setT] = useState([]);
   const [alertas, setA] = useState([]);
@@ -164,18 +166,20 @@ export default function App() {
     setLoading(true);
     setLoadError("");
     try {
-      const [i, g, c, t, a] = await Promise.all([
+const [i, g, c, t, a, gf] = await Promise.all([
         fetchTable("Ingresos"),
         fetchTable("Gastos"),
         fetchTable("Clientes"),
         fetchTable("Tramos de Cotización"),
-        fetchTable("Alertas").catch(() => [])
+        fetchTable("Alertas").catch(() => []),
+        fetchTable("Gastos Fijos").catch(() => [])
       ]);
       setI(i);
       setG(g);
       setC(c);
       setT(t);
       setA(a);
+      setGF(gf);
     } catch (e) {
       console.error("Error cargando datos:", e);
       setLoadError(e.message || "Error cargando datos");
@@ -346,6 +350,14 @@ export default function App() {
             onRefresh={load}
             filtro={filtro}
             setFiltro={setFiltro}
+          />
+       );
+      case "gastosfijos":
+        return (
+          <GastosFijos
+            gastosFijos={gastosFijos}
+            gastos={gastos}
+            onRefresh={load}
           />
         );
       case "alertas":
