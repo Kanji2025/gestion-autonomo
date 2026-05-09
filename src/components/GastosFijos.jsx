@@ -93,12 +93,13 @@ const startEdit = (gf) => {
     }
     setSavingEdit(true);
     try {
-      const fields = {
+const fields = {
         "Nombre": editForm.nombre.trim(),
         "Proveedor": editForm.proveedor.trim(),
         "Periodicidad": editForm.periodicidad,
         "Importe Medio": Number(editForm.importe) || 0,
-        "Moneda": editForm.moneda
+        "Moneda": editForm.moneda,
+        "Tipo": editForm.tipo || "Deducible"
       };
       if (editForm.cifProveedor.trim()) fields["CIF Proveedor"] = editForm.cifProveedor.trim();
       if (editForm.notas.trim()) fields["Notas"] = editForm.notas.trim();
