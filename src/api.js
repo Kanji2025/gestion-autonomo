@@ -132,14 +132,16 @@ export async function findOrCreateClient(nombre, cif = null) {
 // ============================================================
 export async function findGastoFijoByProveedor(proveedor) {
   if (!proveedor || !proveedor.trim()) return null;
-  const clean = proveedor.trim();
-  const safe = clean.replace(/"/g, '\\"');
-  const formula = `{Proveedor}="${safe}"`;
-
-  const records = await fetchTable("Gastos Fijos", formula);
-  return records.length > 0 ? records[0] : null;
+  // Normalizar: quitar espacios extra y pasar a minúsculas para comparación flexible
+  const clean = proveedor.trim().toLowerCase().replace(/\s+/g, " ");
+  // Traemos todos los Gastos Fijos y comparamos en local (son pocos registros)
+  const records = await fetchTable("Gastos Fijos");
+  const found = records.find(r => {
+    const prov = (r.fields["Proveedor"] || "").trim().toLowerCase().replace(/\s+/g, " ");
+    return prov === clean;
+  });
+  return found || null;
 }
-
 // ============================================================
 // CREAR GASTO FIJO (suscripción)
 // Crea una nueva ficha en Gastos Fijos con estado Activa=Sí.
