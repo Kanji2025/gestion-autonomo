@@ -372,11 +372,12 @@ const [i, g, c, t, a, gf] = await Promise.all([
         );
       case "simulador":
         return <Simulador />;
-      case "autonomo":
+case "autonomo":
         return (
           <CuotaAut
             ingresos={ingresos}
             gastos={gastos}
+            gastosFijos={gastosFijos}
             tramos={tramos}
           />
         );
