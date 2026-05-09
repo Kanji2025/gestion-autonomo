@@ -1,6 +1,7 @@
 // src/components/Gastos.jsx
 // Sección de Gastos: alta manual + OCR/IA + edición + duplicado + borrado.
 // Detección AUTOMÁTICA de Gasto Fijo por proveedor.
+// "Aparta cada mes" calculado desde tabla Gastos Fijos (con separación fiscal).
 
 import { useState, useEffect, useRef } from "react";
 import { B, fmt, hoy, applyF } from "../utils.js";
@@ -97,9 +98,36 @@ function DotMenu({ onEdit, onDuplicate, onDelete, disabled }) {
 }
 
 // ============================================================
+// CALCULADORA DE PRORRATEO POR TIPO
+// ============================================================
+function calcularProrrateoMensual(gastosFijos) {
+  let deducible = 0;
+  let cuotaSS = 0;
+  let noDeducible = 0;
+
+  for (const gf of (gastosFijos || [])) {
+    if (gf.fields["Activa"] === "No") continue;
+    const importe = gf.fields["Importe Medio"] || 0;
+    const periodicidad = gf.fields["Periodicidad"] || "Mensual";
+    const tipo = gf.fields["Tipo"] || "Deducible";
+
+    const mensual = periodicidad === "Mensual" ? importe
+      : periodicidad === "Trimestral" ? importe / 3
+      : periodicidad === "Anual" ? importe / 12
+      : 0;
+
+    if (tipo === "Cuota SS") cuotaSS += mensual;
+    else if (tipo === "No deducible") noDeducible += mensual;
+    else deducible += mensual;
+  }
+
+  return { deducible, cuotaSS, noDeducible, total: deducible + cuotaSS + noDeducible };
+}
+
+// ============================================================
 // COMPONENTE PRINCIPAL
 // ============================================================
-export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
+export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, setFiltro }) {
   const { isMobile, formColumns } = useResponsive();
 
   const [showOCR, setShowOCR] = useState(false);
@@ -126,13 +154,10 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
   const fg = applyF(gastos, filtro);
   const fijos = fg.filter(r => ["Mensual", "Anual", "Trimestral"].includes(r.fields["Periodicidad"]));
   const vars = fg.filter(r => !["Mensual", "Anual", "Trimestral"].includes(r.fields["Periodicidad"]));
-  const tMes = fijos.reduce((s, r) => {
-    const b = r.fields["Base Imponible"] || 0;
-    const p = r.fields["Periodicidad"];
-    return s + (p === "Mensual" ? b : p === "Trimestral" ? b / 3 : p === "Anual" ? b / 12 : 0);
-  }, 0);
 
-  // Detección automática del proveedor
+  // CÁLCULO NUEVO desde tabla Gastos Fijos (no desde gastos individuales)
+  const prorrateo = calcularProrrateoMensual(gastosFijos);
+
   useEffect(() => {
     const prov = form.proveedor.trim();
     if (!prov) {
@@ -157,9 +182,6 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
     return () => clearTimeout(timer);
   }, [form.proveedor]);
 
-  // ============================================================
-  // ALTA MANUAL
-  // ============================================================
   const resetForm = () => {
     setForm({
       concepto: "", proveedor: "", fecha: hoy(), base: "", iva: "", irpf: "",
@@ -189,7 +211,6 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
       };
       if (form.irpf) f["IRPF Retenido (€)"] = Number(form.irpf);
 
-      // Si se va a enlazar a un Gasto Fijo, heredamos su Periodicidad para que aparezca en la lista de Fijos
       if (detectado?.existe && !form.esPuntual && detectado.gastoFijo.fields["Periodicidad"]) {
         f["Periodicidad"] = detectado.gastoFijo.fields["Periodicidad"];
       } else if (detectado?.existe === false && form.altaComoFijo) {
@@ -232,9 +253,6 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
     setSav(false);
   };
 
-  // ============================================================
-  // BORRAR
-  // ============================================================
   const del = async (id) => {
     if (!confirm("¿Borrar este gasto?")) return;
     setDelId(id);
@@ -245,14 +263,11 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
     setDelId(null);
   };
 
-  // ============================================================
-  // EDITAR / DUPLICAR
-  // ============================================================
   const startEdit = (g) => {
     const gastoFijoIds = g.fields["Gasto Fijo"] || [];
     setEditState({
       id: g.id,
-      gastoFijoIds, // se preserva, no se modifica desde aquí
+      gastoFijoIds,
       form: {
         concepto: g.fields["Concepto"] || "",
         fecha: g.fields["Fecha"] || hoy(),
@@ -266,7 +281,6 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
 
   const duplicar = async (g) => {
     try {
-      // Capturar el enlace al Gasto Fijo del original (si lo tiene)
       const gastoFijoIds = g.fields["Gasto Fijo"] || [];
 
       const copia = {
@@ -276,10 +290,8 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
         "IVA Soportado (€)": g.fields["IVA Soportado (€)"] || 0
       };
       if (g.fields["IRPF Retenido (€)"]) copia["IRPF Retenido (€)"] = g.fields["IRPF Retenido (€)"];
-      // Heredar la Periodicidad para que también aparezca en "Gastos Fijos"
       if (g.fields["Periodicidad"]) copia["Periodicidad"] = g.fields["Periodicidad"];
 
-      // ENLACE DIRECTO al crear (en vez de createRecord + link en 2 pasos)
       if (gastoFijoIds.length > 0) {
         copia["Gasto Fijo"] = gastoFijoIds;
       }
@@ -366,7 +378,7 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
             fontFamily: B.tS,
             fontWeight: 600
           }}>
-            🔗 Este gasto está enlazado a un Gasto Fijo (la periodicidad se gestiona allí)
+            🔗 Este gasto está enlazado a un Gasto Fijo (la periodicidad y tipo se gestionan allí)
           </div>
         )}
         <div style={{
@@ -462,9 +474,6 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
     );
   };
 
-  // ============================================================
-  // RENDER PRINCIPAL
-  // ============================================================
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
       <SectionHeader
@@ -669,19 +678,61 @@ export default function GastosView({ gastos, onRefresh, filtro, setFiltro }) {
         </div>
       )}
 
+      {/* APARTA CADA MES — NUEVO con separación fiscal */}
       <div style={{ background: B.text, borderRadius: 12, padding: 24, color: "#fff" }}>
         <Lbl><span style={{ color: "rgba(255,255,255,0.6)" }}>APARTA CADA MES</span></Lbl>
         <div style={{ fontSize: 38, fontWeight: 700, marginTop: 6, fontFamily: B.tM }}>
-          {fmt(tMes)}
+          {fmt(prorrateo.total)}
         </div>
-        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", marginTop: 6 }}>
-          Suma prorrateada de tus gastos fijos (mensual + trimestral/3 + anual/12)
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 4, fontFamily: B.tS }}>
+          Total a apartar (todos los Gastos Fijos activos prorrateados a mensual)
+        </div>
+
+        <div style={{
+          marginTop: 18,
+          display: "grid",
+          gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+          gap: 12
+        }}>
+          <div style={{
+            padding: "12px 14px",
+            background: "rgba(34,197,94,0.15)",
+            border: "1px solid rgba(34,197,94,0.3)",
+            borderRadius: 8
+          }}>
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", fontFamily: B.tM, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              🟢 Reduce IRPF
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: B.tM, marginTop: 4 }}>
+              {fmt(prorrateo.deducible + prorrateo.cuotaSS)}
+            </div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: 2 }}>
+              Deducibles {prorrateo.cuotaSS > 0 && `+ Cuota SS (${fmt(prorrateo.cuotaSS)})`}
+            </div>
+          </div>
+
+          <div style={{
+            padding: "12px 14px",
+            background: "rgba(220,38,38,0.15)",
+            border: "1px solid rgba(220,38,38,0.3)",
+            borderRadius: 8
+          }}>
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", fontFamily: B.tM, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              🔴 Solo ocupa caja
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: B.tM, marginTop: 4 }}>
+              {fmt(prorrateo.noDeducible)}
+            </div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: 2 }}>
+              No deducibles (aplazamientos, IVA fraccionado...)
+            </div>
+          </div>
         </div>
       </div>
 
       {fijos.length > 0 && (
         <Card>
-          <Lbl>Gastos Fijos ({fijos.length})</Lbl>
+          <Lbl>Gastos Fijos del periodo ({fijos.length})</Lbl>
           <div style={{ marginTop: 14 }}>
             {fijos.map(g => renderGasto(g, true))}
           </div>
