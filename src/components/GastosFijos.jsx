@@ -114,6 +114,19 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
   // ============================================================
   // DAR DE BAJA / REACTIVAR
   // ============================================================
+  const borrarPermanentemente = async (gf) => {
+    const nombre = gf.fields["Nombre"] || gf.fields["Proveedor"] || "este gasto fijo";
+    const confirm1 = confirm(`¿Seguro que quieres BORRAR PERMANENTEMENTE «${nombre}»?\n\nEsto eliminará el Gasto Fijo de la base de datos. Los gastos individuales asociados quedarán sin enlace, pero NO se borran.`);
+    if (!confirm1) return;
+    const confirm2 = confirm(`Última confirmación:\n\n¿Borrar «${nombre}»? Esta acción NO se puede deshacer.`);
+    if (!confirm2) return;
+    try {
+      await deleteRecord("Gastos Fijos", gf.id);
+      await onRefresh();
+    } catch (e) {
+      alert("Error al borrar: " + e.message);
+    }
+  };
   const confirmarBaja = async () => {
     const { id, accion } = bajaModal;
     try {
