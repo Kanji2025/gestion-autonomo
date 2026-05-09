@@ -1,7 +1,8 @@
 // src/components/GastosFijos.jsx
 // Vista de Gastos Fijos: listado con activos primero, baja al final.
 // Muestra importe medio, total acumulado y nº de pagos por cada uno.
-// Permite editar datos y dar de baja (mantiene historial fiscal).
+// Permite editar datos, dar de baja y borrar permanentemente.
+// "Aparta cada mes" con separación fiscal (deducible/cuota SS/no deducible).
 
 import { useState } from "react";
 import { B, fmt, hoy } from "../utils.js";
@@ -11,9 +12,37 @@ import { Card, Lbl, Inp, Sel, SectionHeader, ErrorBox } from "./UI.jsx";
 
 const PERIODICIDADES = ["Mensual", "Trimestral", "Anual"];
 const MONEDAS = ["EUR", "USD", "GBP"];
+const TIPOS = ["Deducible", "Cuota SS", "No deducible"];
+
+// ============================================================
+// CALCULADORA DE PRORRATEO POR TIPO
+// ============================================================
+function calcularProrrateoMensual(gastosFijos) {
+  let deducible = 0;
+  let cuotaSS = 0;
+  let noDeducible = 0;
+
+  for (const gf of (gastosFijos || [])) {
+    if (gf.fields["Activa"] === "No") continue;
+    const importe = gf.fields["Importe Medio"] || 0;
+    const periodicidad = gf.fields["Periodicidad"] || "Mensual";
+    const tipo = gf.fields["Tipo"] || "Deducible";
+
+    const mensual = periodicidad === "Mensual" ? importe
+      : periodicidad === "Trimestral" ? importe / 3
+      : periodicidad === "Anual" ? importe / 12
+      : 0;
+
+    if (tipo === "Cuota SS") cuotaSS += mensual;
+    else if (tipo === "No deducible") noDeducible += mensual;
+    else deducible += mensual;
+  }
+
+  return { deducible, cuotaSS, noDeducible, total: deducible + cuotaSS + noDeducible };
+}
 
 export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
-  const { formColumns } = useResponsive();
+  const { isMobile, formColumns } = useResponsive();
   const [editId, setEditId] = useState(null);
   const [editForm, setEditForm] = useState(null);
   const [savingEdit, setSavingEdit] = useState(false);
@@ -37,12 +66,7 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
 
     return {
       ...gf,
-      _stats: {
-        totalPagado,
-        numPagos,
-        ultimaFecha,
-        importeMedio
-      }
+      _stats: { totalPagado, numPagos, ultimaFecha, importeMedio }
     };
   };
 
@@ -50,17 +74,13 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
   const activos = enriquecidos.filter(g => g.fields["Activa"] === "Sí" || !g.fields["Activa"]);
   const inactivos = enriquecidos.filter(g => g.fields["Activa"] === "No");
 
-  // Total prorrateado mensual de todos los activos
-  const totalMensualActivos = activos.reduce((s, gf) => {
-    const importe = gf.fields["Importe Medio"] || 0;
-    const p = gf.fields["Periodicidad"];
-    return s + (p === "Mensual" ? importe : p === "Trimestral" ? importe / 3 : p === "Anual" ? importe / 12 : 0);
-  }, 0);
+  // CÁLCULO con separación fiscal
+  const prorrateo = calcularProrrateoMensual(gastosFijos);
 
   // ============================================================
   // EDICIÓN
   // ============================================================
-const startEdit = (gf) => {
+  const startEdit = (gf) => {
     setErr("");
     setEditId(gf.id);
     setEditForm({
@@ -93,7 +113,7 @@ const startEdit = (gf) => {
     }
     setSavingEdit(true);
     try {
-const fields = {
+      const fields = {
         "Nombre": editForm.nombre.trim(),
         "Proveedor": editForm.proveedor.trim(),
         "Periodicidad": editForm.periodicidad,
@@ -116,19 +136,6 @@ const fields = {
   // ============================================================
   // DAR DE BAJA / REACTIVAR
   // ============================================================
-  const borrarPermanentemente = async (gf) => {
-    const nombre = gf.fields["Nombre"] || gf.fields["Proveedor"] || "este gasto fijo";
-    const confirm1 = confirm(`¿Seguro que quieres BORRAR PERMANENTEMENTE «${nombre}»?\n\nEsto eliminará el Gasto Fijo de la base de datos. Los gastos individuales asociados quedarán sin enlace, pero NO se borran.`);
-    if (!confirm1) return;
-    const confirm2 = confirm(`Última confirmación:\n\n¿Borrar «${nombre}»? Esta acción NO se puede deshacer.`);
-    if (!confirm2) return;
-    try {
-      await deleteRecord("Gastos Fijos", gf.id);
-      await onRefresh();
-    } catch (e) {
-      alert("Error al borrar: " + e.message);
-    }
-  };
   const confirmarBaja = async () => {
     const { id, accion } = bajaModal;
     try {
@@ -143,6 +150,23 @@ const fields = {
       await onRefresh();
     } catch (e) {
       alert("Error: " + e.message);
+    }
+  };
+
+  // ============================================================
+  // BORRAR PERMANENTEMENTE
+  // ============================================================
+  const borrarPermanentemente = async (gf) => {
+    const nombre = gf.fields["Nombre"] || gf.fields["Proveedor"] || "este gasto fijo";
+    const confirm1 = confirm(`¿Seguro que quieres BORRAR PERMANENTEMENTE «${nombre}»?\n\nEsto eliminará el Gasto Fijo de la base de datos. Los gastos individuales asociados quedarán sin enlace, pero NO se borran.`);
+    if (!confirm1) return;
+    const confirm2 = confirm(`Última confirmación:\n\n¿Borrar «${nombre}»? Esta acción NO se puede deshacer.`);
+    if (!confirm2) return;
+    try {
+      await deleteRecord("Gastos Fijos", gf.id);
+      await onRefresh();
+    } catch (e) {
+      alert("Error al borrar: " + e.message);
     }
   };
 
@@ -218,14 +242,13 @@ const fields = {
               {fechaBaja && <span> · Baja: {fechaBaja}</span>}
             </div>
 
-            {/* Estadísticas en chips */}
             <div style={{
               marginTop: 10,
               display: "flex",
               gap: 6,
               flexWrap: "wrap"
             }}>
-             {(() => {
+              {(() => {
                 const tipo = gf.fields["Tipo"] || "Deducible";
                 const tipoColor = tipo === "Deducible" ? B.green : tipo === "Cuota SS" ? "#3b82f6" : B.red;
                 const tipoIcon = tipo === "Deducible" ? "🟢" : tipo === "Cuota SS" ? "🔵" : "🔴";
@@ -250,6 +273,7 @@ const fields = {
                 </div>
               )}
             </div>
+
             {notas && (
               <div style={{
                 marginTop: 8,
@@ -275,7 +299,7 @@ const fields = {
                 ≈ {fmt(importeMensual)}/mes
               </div>
             )}
-<div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
               <button onClick={() => startEdit(gf)} style={iconBtnStyle(B.text)} title="Editar">
                 ✏️
               </button>
@@ -316,7 +340,7 @@ const fields = {
       <Card style={{ border: `2px solid ${B.purple}` }}>
         <Lbl><span style={{ color: B.purple }}>EDITAR GASTO FIJO</span></Lbl>
         <ErrorBox>{err}</ErrorBox>
-       <div style={{
+        <div style={{
           display: "grid",
           gridTemplateColumns: `repeat(${formColumns}, 1fr)`,
           gap: 14,
@@ -328,7 +352,7 @@ const fields = {
           <Inp label="Importe Medio" value={editForm.importe} onChange={v => updateField("importe", v)} type="number" />
           <Sel label="Periodicidad" value={editForm.periodicidad} onChange={v => updateField("periodicidad", v)} options={PERIODICIDADES} />
           <Sel label="Moneda" value={editForm.moneda} onChange={v => updateField("moneda", v)} options={MONEDAS} />
-          <Sel label="Tipo Fiscal" value={editForm.tipo} onChange={v => updateField("tipo", v)} options={["Deducible", "Cuota SS", "No deducible"]} />
+          <Sel label="Tipo Fiscal" value={editForm.tipo} onChange={v => updateField("tipo", v)} options={TIPOS} />
         </div>
         <div style={{ marginTop: 14 }}>
           <label style={{
@@ -366,14 +390,10 @@ const fields = {
     );
   };
 
-  // ============================================================
-  // RENDER PRINCIPAL
-  // ============================================================
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
       <SectionHeader title="Gastos Fijos" />
 
-      {/* EDITOR (cuando está activo) */}
       {editId && (
         <div>
           <div style={{
@@ -391,18 +411,58 @@ const fields = {
         </div>
       )}
 
-      {/* RESUMEN ARRIBA */}
+      {/* APARTA CADA MES — coherente con pantalla Gastos */}
       <div style={{ background: B.text, borderRadius: 12, padding: 24, color: "#fff" }}>
-        <Lbl><span style={{ color: "rgba(255,255,255,0.6)" }}>TOTAL MENSUAL DE GASTOS FIJOS ACTIVOS</span></Lbl>
+        <Lbl><span style={{ color: "rgba(255,255,255,0.6)" }}>APARTA CADA MES</span></Lbl>
         <div style={{ fontSize: 38, fontWeight: 700, marginTop: 6, fontFamily: B.tM }}>
-          {fmt(totalMensualActivos)}
+          {fmt(prorrateo.total)}
         </div>
-        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", marginTop: 6 }}>
-          {activos.length} {activos.length === 1 ? "gasto fijo activo" : "gastos fijos activos"} · prorrateados a mensual
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 4, fontFamily: B.tS }}>
+          {activos.length} {activos.length === 1 ? "gasto fijo activo" : "gastos fijos activos"} prorrateados a mensual
+        </div>
+
+        <div style={{
+          marginTop: 18,
+          display: "grid",
+          gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+          gap: 12
+        }}>
+          <div style={{
+            padding: "12px 14px",
+            background: "rgba(34,197,94,0.15)",
+            border: "1px solid rgba(34,197,94,0.3)",
+            borderRadius: 8
+          }}>
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", fontFamily: B.tM, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              🟢 Reduce IRPF
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: B.tM, marginTop: 4 }}>
+              {fmt(prorrateo.deducible + prorrateo.cuotaSS)}
+            </div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: 2 }}>
+              Deducibles {prorrateo.cuotaSS > 0 && `+ Cuota SS (${fmt(prorrateo.cuotaSS)})`}
+            </div>
+          </div>
+
+          <div style={{
+            padding: "12px 14px",
+            background: "rgba(220,38,38,0.15)",
+            border: "1px solid rgba(220,38,38,0.3)",
+            borderRadius: 8
+          }}>
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", fontFamily: B.tM, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              🔴 Solo ocupa caja
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: B.tM, marginTop: 4 }}>
+              {fmt(prorrateo.noDeducible)}
+            </div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: 2 }}>
+              No deducibles (aplazamientos, IVA fraccionado...)
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* ACTIVOS */}
       {activos.length > 0 ? (
         <Card>
           <Lbl>Activos ({activos.length})</Lbl>
@@ -419,7 +479,6 @@ const fields = {
         </Card>
       )}
 
-      {/* INACTIVOS (colapsable) */}
       {inactivos.length > 0 && (
         <div>
           <button
@@ -445,7 +504,6 @@ const fields = {
         </div>
       )}
 
-      {/* MODAL CONFIRMACIÓN BAJA / REACTIVAR */}
       {bajaModal && (
         <div style={{
           position: "fixed",
@@ -502,7 +560,6 @@ const fields = {
   );
 }
 
-// Estilos auxiliares
 function chipStyle(color) {
   return {
     padding: "4px 10px",
