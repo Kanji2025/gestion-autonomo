@@ -1,5 +1,6 @@
 // src/utils.js
 // Helpers, constantes y estilos compartidos.
+// REDISEÑO 2026: minimalista blanco/negro + Work Sans único.
 
 // ============================================================
 // FORMATEO Y CÁLCULOS
@@ -52,63 +53,120 @@ export function applyF(recs, filtro, df = "Fecha") {
   });
 }
 
+// Día y mes legibles (para saludos)
+export function todayLong() {
+  return new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" });
+}
+
+export function mesActualLabel() {
+  return MESES_FULL[new Date().getMonth()].toLowerCase();
+}
+
+// Fechas oficiales del IVA (modelo 303)
+export function ivaDeadline(quarter, year) {
+  const map = {
+    Q1: `20 de abril de ${year}`,
+    Q2: `20 de julio de ${year}`,
+    Q3: `20 de octubre de ${year}`,
+    Q4: `30 de enero de ${Number(year) + 1}`,
+  };
+  return map[quarter] || "";
+}
+
 // ============================================================
-// PALETA DE COLORES Y ESTILOS BASE — REDISEÑO 2026
+// PALETA Y TOKENS DE DISEÑO
 // Minimalista: blanco/negro + amarillo y lavanda como acentos.
 // ============================================================
 export const B = {
   // Colores base
-  bg: "#fafafa",                         // fondo blanco roto (antes: gradiente pastel)
-  surface: "#ffffff",                    // superficies de cards
-  card: "#ffffff",                       // alias para retrocompatibilidad
-  border: "#ececec",                     // bordes sutiles (antes: rgba(0,0,0,0.07))
-  text: "#000000",                       // negro puro (antes: #111)
-  muted: "#6b6b6b",                      // texto secundario (antes: #555)
-  soft: "#a3a3a3",                       // texto terciario / footer
+  bg: "#fafafa",
+  surface: "#ffffff",
+  card: "#ffffff",                       // alias retrocompatibilidad
+  border: "#ececec",
+  text: "#000000",
+  ink: "#000000",                        // alias semántico
+  muted: "#6b6b6b",
+  inkMuted: "#6b6b6b",                   // alias
+  soft: "#a3a3a3",
+  inkSoft: "#a3a3a3",                    // alias
 
-  // Acentos
-  yellow: "#f0e991",                     // amarillo de marca
-  lavender: "#b1b8f4",                   // lavanda de marca
-  purple: "#6e72b8",                     // púrpura (mantener para compatibilidad)
+  // Acentos de marca
+  yellow: "#f0e991",
+  lavender: "#b1b8f4",
+  purple: "#6e72b8",                     // mantener para retrocompatibilidad
 
-  // Semáforo (más sobrio)
-  green: "#2f7a4f",                      // verde sobrio (antes: #16a34a)
-  red: "#c14545",                        // rojo sobrio (antes: #dc2626)
-  amber: "#d97706",                      // ámbar (sin cambio)
+  // Semáforo (versión sobria + soft para fondos)
+  green: "#2f7a4f",
+  greenSoft: "#e8f3ec",
+  success: "#2f7a4f",                    // alias
+  successSoft: "#e8f3ec",                // alias
+  red: "#c14545",
+  redSoft: "#f7e8e8",
+  danger: "#c14545",                     // alias
+  dangerSoft: "#f7e8e8",                 // alias
+  amber: "#b87333",
+  amberSoft: "#f7ede0",
+  warning: "#b87333",                    // alias
+  warningSoft: "#f7ede0",                // alias
 
-  // Tipografía: SOLO Work Sans
-  tS: "'Work Sans', system-ui, sans-serif",   // body y todo
-  tM: "'Work Sans', system-ui, sans-serif",   // alias para retrocompatibilidad (antes era Roboto Mono)
+  // Tipografía: Work Sans único
+  font: "'Work Sans', system-ui, sans-serif",
+  tS: "'Work Sans', system-ui, sans-serif",   // body
+  tM: "'Work Sans', system-ui, sans-serif",   // alias retrocompatibilidad
 
   // Números tabulares (alineación impecable)
   num: { fontVariantNumeric: "tabular-nums", fontFeatureSettings: '"tnum"' },
 
-  // BOTONES — pills redondeados (antes: rectángulos)
+  // Escala tipográfica fluida (clamp)
+  ty: {
+    display: "clamp(32px, 4.5vw, 44px)",
+    h1: "clamp(24px, 3.5vw, 32px)",
+    h1Sub: "clamp(14px, 1.5vw, 16px)",
+    heroCardNum: "clamp(24px, 3vw, 32px)",
+    h2: "clamp(17px, 2vw, 20px)",
+    numL: "clamp(22px, 2.6vw, 28px)",
+    numM: "clamp(17px, 1.9vw, 20px)",
+    body: "15px",
+    small: "14px",
+    label: "12px"
+  },
+
+  // BOTONES — pills redondeados
   btn: {
     background: "#000000",
     color: "#ffffff",
-    border: "none",
+    border: "1px solid transparent",
     borderRadius: 999,
-    padding: "11px 20px",
+    padding: "10px 18px",
     fontWeight: 600,
     fontSize: 13,
     cursor: "pointer",
     fontFamily: "'Work Sans', system-ui, sans-serif",
-    letterSpacing: "0.01em",
-    transition: "opacity 0.15s ease"
+    letterSpacing: "0.005em",
+    transition: "opacity 0.15s ease",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    whiteSpace: "nowrap"
   },
   btnSm: {
     background: "#000000",
     color: "#ffffff",
-    border: "none",
+    border: "1px solid transparent",
     borderRadius: 999,
     padding: "8px 14px",
     fontWeight: 600,
     fontSize: 12,
     cursor: "pointer",
     fontFamily: "'Work Sans', system-ui, sans-serif",
-    letterSpacing: "0.01em",
-    transition: "opacity 0.15s ease"
+    letterSpacing: "0.005em",
+    transition: "opacity 0.15s ease",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    whiteSpace: "nowrap"
   },
   btnDel: {
     background: "transparent",
@@ -120,57 +178,38 @@ export const B = {
     fontSize: 11,
     cursor: "pointer",
     fontFamily: "'Work Sans', system-ui, sans-serif",
-    letterSpacing: "0.01em"
+    letterSpacing: "0.005em"
   },
-  // INPUTS — bordes finos y radio mayor
+
+  // INPUTS
   inp: {
     width: "100%",
     padding: "11px 14px",
-    borderRadius: 10,
+    borderRadius: 12,
     border: "1px solid #ececec",
     background: "#ffffff",
     color: "#000000",
     fontSize: 14,
     fontFamily: "'Work Sans', system-ui, sans-serif",
+    fontWeight: 500,
     outline: "none",
     boxSizing: "border-box",
     transition: "border-color 0.15s ease"
-  },
-
-  // CARDS — blancas planas con borde sutil (antes glassmorphism)
-  cardStyle: {
-    background: "#ffffff",
-    borderRadius: 20,
-    border: "1px solid #ececec",
-    padding: "clamp(20px, 3vw, 28px)"
-  },
-
-  // Escala tipográfica fluida (clamp)
-  ty: {
-    display: "clamp(32px, 4.5vw, 44px)",   // hero numbers
-    h1: "clamp(24px, 3.5vw, 32px)",        // títulos grandes
-    h1Sub: "clamp(14px, 1.5vw, 16px)",     // subtítulos
-    h2: "clamp(17px, 2vw, 20px)",          // títulos sección
-    numL: "clamp(22px, 2.6vw, 28px)",      // KPI
-    numM: "clamp(17px, 1.9vw, 20px)",      // breakdown
-    body: "15px",
-    small: "14px",
-    label: "12px"
   }
 };
 
 // ============================================================
-// MENÚ PRINCIPAL
+// MENÚ PRINCIPAL — copys descriptivos en minúsculas
 // ============================================================
 export const MENU = [
-  { id: "dashboard", label: "DASHBOARD" },
-  { id: "facturas", label: "FACTURAS" },
-  { id: "clientes", label: "CLIENTES" },
-  { id: "gastos", label: "GASTOS" },
-  { id: "gastosfijos", label: "GASTOS FIJOS" },
-  { id: "alertas", label: "ALERTAS" },
-  { id: "simulador", label: "SIMULADOR" },
-  { id: "autonomo", label: "CUOTA AUTÓNOMOS" }
+  { id: "dashboard", label: "Resumen", iconName: "LayoutDashboard" },
+  { id: "facturas", label: "Facturas", iconName: "FileText" },
+  { id: "clientes", label: "Clientes", iconName: "Users" },
+  { id: "gastos", label: "Gastos", iconName: "Receipt" },
+  { id: "gastosfijos", label: "Gastos fijos", iconName: "Repeat" },
+  { id: "alertas", label: "Alertas", iconName: "Bell" },
+  { id: "simulador", label: "Simulador", iconName: "Calculator" },
+  { id: "autonomo", label: "Cuota autónomos", iconName: "ShieldCheck" }
 ];
 
 // ============================================================
