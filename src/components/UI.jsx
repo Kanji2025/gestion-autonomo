@@ -21,7 +21,7 @@ export function Card({ children, style, dark = false, accent = null }) {
     : accent === "lavender"
     ? B.lavender
     : B.surface;
-  const border = dark || accent ? "transparent" : B.border;
+const border = dark ? "transparent" : accent ? B.ink : B.border;
   return (
     <div style={{
       background: bg,
