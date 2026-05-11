@@ -6,7 +6,8 @@
 import { useState, useEffect, useRef } from "react";
 import {
   Plus, X, Sparkles, Edit3, Copy, Trash2, Check,
-  Calendar, Repeat, Link as LinkIcon, MoreVertical
+  Calendar, Repeat, Link as LinkIcon, MoreVertical,
+  Receipt, Percent, Hash
 } from "lucide-react";
 
 import { B, fmt, hoy, applyF } from "../utils.js";
@@ -15,7 +16,7 @@ import {
   createRecord, updateRecord, deleteRecord,
   findGastoFijoByProveedor, createGastoFijo, linkGastoToGastoFijo
 } from "../api.js";
-import { Card, Lbl, Inp, Sel, PageHeader, FilterBar, ErrorBox, Btn } from "./UI.jsx";
+import { Card, Lbl, Inp, Sel, PageHeader, FilterBar, ErrorBox, Btn, IconPill } from "./UI.jsx";
 import NuevoForm from "./NuevoForm.jsx";
 
 // ============================================================
@@ -163,9 +164,14 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
     monedaFijo: "EUR"
   });
 
-  const fg = applyF(gastos, filtro);
+const fg = applyF(gastos, filtro);
   const fijos = fg.filter(r => ["Mensual", "Anual", "Trimestral"].includes(r.fields["Periodicidad"]));
   const vars = fg.filter(r => !["Mensual", "Anual", "Trimestral"].includes(r.fields["Periodicidad"]));
+
+  // KPIs del período
+  const totalGastos = fg.reduce((s, r) => s + (r.fields["Base Imponible"] || 0), 0);
+  const totalIVASoportado = fg.reduce((s, r) => s + (r.fields["IVA Soportado (€)"] || 0), 0);
+  const numGastos = fg.length;
 
   const prorrateo = calcularProrrateoMensual(gastosFijos);
 
@@ -530,7 +536,77 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
         }
       />
 
-      <FilterBar filtro={filtro} setFiltro={setFiltro} />
+     <FilterBar filtro={filtro} setFiltro={setFiltro} />
+
+      {/* KPIs DEL PERÍODO — total, IVA soportado, nº de gastos */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: isMobile ? "1fr" : "repeat(3, 1fr)",
+        gap: 12
+      }}>
+        <Card>
+          <IconPill icon={Receipt} />
+          <div style={{ marginTop: 14 }}>
+            <Lbl>Total gastos</Lbl>
+          </div>
+          <div style={{
+            fontSize: B.ty.numL,
+            fontWeight: 700,
+            marginTop: 6,
+            color: B.ink,
+            letterSpacing: "-0.02em",
+            fontFamily: B.font,
+            ...B.num
+          }}>
+            {fmt(totalGastos)}
+          </div>
+          <div style={{ fontSize: B.ty.small, color: B.muted, marginTop: 4, fontFamily: B.font }}>
+            Del período seleccionado
+          </div>
+        </Card>
+
+        <Card>
+          <IconPill icon={Percent} />
+          <div style={{ marginTop: 14 }}>
+            <Lbl>IVA soportado</Lbl>
+          </div>
+          <div style={{
+            fontSize: B.ty.numL,
+            fontWeight: 700,
+            marginTop: 6,
+            color: B.ink,
+            letterSpacing: "-0.02em",
+            fontFamily: B.font,
+            ...B.num
+          }}>
+            {fmt(totalIVASoportado)}
+          </div>
+          <div style={{ fontSize: B.ty.small, color: B.muted, marginTop: 4, fontFamily: B.font }}>
+            Recuperable en la declaración
+          </div>
+        </Card>
+
+        <Card>
+          <IconPill icon={Hash} />
+          <div style={{ marginTop: 14 }}>
+            <Lbl>Número de gastos</Lbl>
+          </div>
+          <div style={{
+            fontSize: B.ty.numL,
+            fontWeight: 700,
+            marginTop: 6,
+            color: B.ink,
+            letterSpacing: "-0.02em",
+            fontFamily: B.font,
+            ...B.num
+          }}>
+            {numGastos}
+          </div>
+          <div style={{ fontSize: B.ty.small, color: B.muted, marginTop: 4, fontFamily: B.font }}>
+            En este período
+          </div>
+        </Card>
+      </div>
 
       {/* TOAST DE DUPLICADO — amarillo Kanji */}
       {duplicadoToast && (
