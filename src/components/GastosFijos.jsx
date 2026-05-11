@@ -231,12 +231,12 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
               )}
             </div>
 
-            <div style={{ fontSize: 12, color: B.muted, marginTop: 4, fontFamily: B.tS }}>
+            <div style={{ fontSize: 12, color: B.ink, marginTop: 4, fontFamily: B.tS }}>
               <span style={{ fontWeight: 600 }}>{gf.fields["Proveedor"] || "—"}</span>
               {gf.fields["CIF Proveedor"] && <span> · CIF: {gf.fields["CIF Proveedor"]}</span>}
             </div>
 
-            <div style={{ fontSize: 11, color: B.muted, marginTop: 6, fontFamily: B.tM }}>
+            <div style={{ fontSize: 11, color: B.ink, marginTop: 6, fontFamily: B.tM }}>
               📅 {periodicidad}
               {fechaAlta && <span> · Alta: {fechaAlta}</span>}
               {fechaBaja && <span> · Baja: {fechaBaja}</span>}
@@ -358,7 +358,7 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
           <label style={{
             fontSize: 11, fontWeight: 700, fontFamily: B.tM,
             textTransform: "uppercase", letterSpacing: "0.08em",
-            color: B.muted, display: "block", marginBottom: 6
+            color: B.ink, display: "block", marginBottom: 6
           }}>NOTAS</label>
           <textarea
             value={editForm.notas}
@@ -433,7 +433,7 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
         </div>
         <div style={{
           fontSize: B.ty.small,
-          color: B.muted,
+          color: B.ink,
           marginTop: 10,
           fontFamily: B.font,
           lineHeight: 1.5,
@@ -465,7 +465,7 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
             </div>
             <div style={{
               fontSize: 12,
-              color: B.muted,
+              color: B.ink,
               marginTop: 4,
               fontFamily: B.font,
               lineHeight: 1.4
@@ -489,7 +489,7 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
             </div>
             <div style={{
               fontSize: 12,
-              color: B.muted,
+              color: B.ink,
               marginTop: 4,
               fontFamily: B.font,
               lineHeight: 1.4
@@ -509,7 +509,7 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
         </Card>
       ) : (
         <Card>
-          <p style={{ color: B.muted, fontFamily: B.tS, margin: 0, textAlign: "center", padding: "20px 0" }}>
+          <p style={{ color: B.ink, fontFamily: B.tS, margin: 0, textAlign: "center", padding: "20px 0" }}>
             No tienes gastos fijos activos. Cuando añadas un gasto manual y marques la opción
             <strong> "Es un gasto fijo recurrente"</strong>, aparecerá aquí.
           </p>
@@ -523,7 +523,7 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
             style={{
               ...B.btnSm,
               background: "transparent",
-              color: B.muted,
+              color: B.ink,
               border: `1px solid ${B.border}`,
               width: "100%",
               padding: "10px 14px"
@@ -567,7 +567,7 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
             <div style={{ fontSize: 16, fontWeight: 700, fontFamily: B.tS, marginBottom: 10 }}>
               {bajaModal.accion === "baja" ? "Dar de baja" : "Reactivar"} «{bajaModal.nombre}»
             </div>
-            <div style={{ fontSize: 13, color: B.muted, marginBottom: 20, lineHeight: 1.5 }}>
+            <div style={{ fontSize: 13, color: B.ink, marginBottom: 20, lineHeight: 1.5 }}>
               {bajaModal.accion === "baja"
                 ? "El gasto fijo se marcará como inactivo y no contará en el total mensual. El historial fiscal de los pagos asociados se mantiene intacto."
                 : "El gasto fijo volverá a estar activo y contará en el total mensual."}
