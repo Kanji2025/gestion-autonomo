@@ -1,7 +1,13 @@
 // src/App.jsx
 // Cerebro principal: routing, autenticación, carga de datos, campanita, pop-up.
+// REDISEÑO 2026: header con KanjiMark + sidebar overlay con iconos lucide.
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import {
+  Menu, X, Calendar, LogOut, Bell as BellIcon,
+  LayoutDashboard, FileText, Users, Receipt, Repeat,
+  Bell, Calculator, ShieldCheck
+} from "lucide-react";
 
 import { B, MENU } from "./utils.js";
 import { useResponsive } from "./hooks/useResponsive.js";
@@ -11,7 +17,7 @@ import {
 } from "./api.js";
 
 import Login from "./components/Login.jsx";
-import { LoadingScreen, ErrorBox } from "./components/UI.jsx";
+import { LoadingScreen, ErrorBox, KanjiMark, Btn } from "./components/UI.jsx";
 import AlertPopup from "./components/AlertPopup.jsx";
 import Dashboard from "./components/Dashboard.jsx";
 import FacturasView from "./components/Facturas.jsx";
@@ -27,70 +33,70 @@ import AlertasView, {
 } from "./components/Alertas.jsx";
 import NotificationDropdown from "./components/NotificationDropdown.jsx";
 
-const FONTS_LINK = "https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&family=Work+Sans:wght@400;500;600;700;800&display=swap";
-
+const FONTS_LINK = "https://fonts.googleapis.com/css2?family=Work+Sans:wght@300;400;500;600;700;800&display=swap";
 const POPUP_SHOWN_DATE_KEY = "ga_popup_shown_date";
 
-// ============================================================
-// COMPONENTE CAMPANITA
-// ============================================================
-function NotificationBell({ count, maxPriority, onClick, isMobile, active }) {
-  const badgeColor = maxPriority === "Alta" ? B.red
-    : maxPriority === "Media" ? B.amber
-    : B.muted;
+// Mapa de iconos lucide para cada item del MENU
+const MENU_ICONS = {
+  LayoutDashboard,
+  FileText,
+  Users,
+  Receipt,
+  Repeat,
+  Bell,
+  Calculator,
+  ShieldCheck
+};
 
+// ============================================================
+// COMPONENTE CAMPANITA — refinado con lucide Bell + badge negro
+// ============================================================
+function NotificationBell({ count, onClick, isMobile, active }) {
   return (
     <button
       data-bell-button
       onClick={onClick}
       title={count > 0 ? `${count} alerta${count > 1 ? "s" : ""} pendiente${count > 1 ? "s" : ""}` : "Sin alertas"}
       style={{
-        background: active ? "rgba(0,0,0,0.06)" : "transparent",
+        background: active ? "#f4f4f4" : "transparent",
         border: "none",
         cursor: "pointer",
-        padding: 6,
+        padding: 8,
         position: "relative",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        borderRadius: 6,
+        borderRadius: 999,
         transition: "background 0.15s ease"
       }}
       aria-label="Notificaciones"
     >
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke={count > 0 ? B.text : B.muted}
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        style={{ width: isMobile ? 20 : 22, height: isMobile ? 20 : 22 }}
-      >
-        <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
-        <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
-      </svg>
-
+      <BellIcon
+        size={isMobile ? 18 : 20}
+        strokeWidth={2}
+        color={count > 0 ? B.ink : B.muted}
+      />
       {count > 0 && (
         <span style={{
           position: "absolute",
-          top: 0,
-          right: 0,
-          background: badgeColor,
+          top: 2,
+          right: 2,
+          background: B.ink,
           color: "#fff",
           fontSize: 10,
           fontWeight: 700,
-          fontFamily: B.tM,
-          minWidth: 18,
-          height: 18,
-          borderRadius: 9,
+          fontFamily: B.font,
+          minWidth: 17,
+          height: 17,
+          borderRadius: 999,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          padding: "0 5px",
-          border: "2px solid rgba(255,255,255,0.9)",
+          padding: "0 4px",
+          border: `2px solid ${B.surface}`,
           boxSizing: "content-box",
-          lineHeight: 1
+          lineHeight: 1,
+          ...B.num
         }}>
           {count > 99 ? "99+" : count}
         </span>
@@ -100,7 +106,7 @@ function NotificationBell({ count, maxPriority, onClick, isMobile, active }) {
 }
 
 // ============================================================
-// HELPER: ¿el popup ya se mostró hoy en este dispositivo?
+// HELPERS POPUP
 // ============================================================
 function popupAlreadyShownToday() {
   try {
@@ -148,16 +154,13 @@ export default function App() {
     mes: ""
   });
 
-  // Pop-up y dropdown
   const [popupAlerts, setPopupAlerts] = useState([]);
   const [popupCheckedThisSession, setPopupCheckedThisSession] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
-
-  // Contador de "refresh" para forzar re-render cuando cambian los descartes locales
   const [bellRefreshCounter, setBellRefreshCounter] = useState(0);
 
   const responsive = useResponsive();
-  const { isMobile, isPhoneOrSmallTablet } = responsive;
+  const { isMobile } = responsive;
 
   // ============================================================
   // CARGA DE DATOS
@@ -166,7 +169,7 @@ export default function App() {
     setLoading(true);
     setLoadError("");
     try {
-const [i, g, c, t, a, gf] = await Promise.all([
+      const [i, g, c, t, a, gf] = await Promise.all([
         fetchTable("Ingresos"),
         fetchTable("Gastos"),
         fetchTable("Clientes"),
@@ -174,12 +177,7 @@ const [i, g, c, t, a, gf] = await Promise.all([
         fetchTable("Alertas").catch(() => []),
         fetchTable("Gastos Fijos").catch(() => [])
       ]);
-      setI(i);
-      setG(g);
-      setC(c);
-      setT(t);
-      setA(a);
-      setGF(gf);
+      setI(i); setG(g); setC(c); setT(t); setA(a); setGF(gf);
     } catch (e) {
       console.error("Error cargando datos:", e);
       setLoadError(e.message || "Error cargando datos");
@@ -191,23 +189,19 @@ const [i, g, c, t, a, gf] = await Promise.all([
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    if (auth) load();
-  }, [auth, load]);
+  useEffect(() => { if (auth) load(); }, [auth, load]);
 
-  // Refresco que también actualiza el contador de la campana (sin re-cargar de Airtable)
   const refreshLocal = useCallback(() => {
     setBellRefreshCounter(c => c + 1);
   }, []);
 
-  // Refresco completo tras marcar una alerta: recargamos Airtable Y actualizamos contador
   const refreshAll = useCallback(async () => {
     await load();
     refreshLocal();
   }, [load, refreshLocal]);
 
   // ============================================================
-  // CALCULAR ALERTAS PENDIENTES (para campana y popup)
+  // ALERTAS PENDIENTES
   // ============================================================
   const cuotaActual = (() => {
     try { return Number(localStorage.getItem("ga_cuota")) || 294; } catch { return 294; }
@@ -215,52 +209,32 @@ const [i, g, c, t, a, gf] = await Promise.all([
 
   const pendingAlerts = useMemo(() => {
     if (!auth || loading) return [];
-    // bellRefreshCounter: dependencia artificial para forzar recálculo cuando se marca una alerta como leída
     void bellRefreshCounter;
     const autoAlerts = generateAutoAlerts(ingresos, gastos, tramos, cuotaActual);
     return getPendingAlerts(alertas, autoAlerts);
   }, [auth, loading, ingresos, gastos, tramos, alertas, cuotaActual, bellRefreshCounter]);
 
-  // Limpiar descartes antiguos (huellas que ya no existen) al cargar
   useEffect(() => {
     if (!auth || loading) return;
-    // Recalculamos TODAS las automáticas ignorando descartes, para saber las huellas vivas
     const allAutos = generateAutoAlerts(ingresos, gastos, tramos, cuotaActual, { ignoreDismissed: true });
     const activeFingerprints = {};
-    allAutos.forEach(a => {
-      activeFingerprints[a.id] = a.fingerprint;
-    });
+    allAutos.forEach(a => { activeFingerprints[a.id] = a.fingerprint; });
     cleanupDismissed(activeFingerprints);
   }, [auth, loading, ingresos, gastos, tramos, cuotaActual]);
 
-  // Disparar pop-up una vez al día (solo la primera carga de la sesión)
   useEffect(() => {
     if (!auth || loading || popupCheckedThisSession) return;
     setPopupCheckedThisSession(true);
-
     if (popupAlreadyShownToday()) return;
     if (pendingAlerts.length === 0) return;
-
     setPopupAlerts(pendingAlerts);
     markPopupShownToday();
   }, [auth, loading, popupCheckedThisSession, pendingAlerts]);
 
-  // ============================================================
-  // INFO DE LA CAMPANA (contador y prioridad máxima)
-  // ============================================================
-  const bellInfo = useMemo(() => {
-    let maxPriority = "Baja";
-    for (const a of pendingAlerts) {
-      if (a.prioridad === "Alta") { maxPriority = "Alta"; break; }
-      if (a.prioridad === "Media" && maxPriority !== "Alta") maxPriority = "Media";
-    }
-    return { count: pendingAlerts.length, maxPriority };
-  }, [pendingAlerts]);
+  const bellCount = pendingAlerts.length;
 
   const closePopup = () => setPopupAlerts([]);
-  const onAlertDismissed = async () => {
-    await refreshAll();
-  };
+  const onAlertDismissed = async () => { await refreshAll(); };
 
   // ============================================================
   // RENDERS DE BLOQUEO
@@ -270,7 +244,7 @@ const [i, g, c, t, a, gf] = await Promise.all([
   }
 
   if (loading) {
-    return <LoadingScreen message="Cargando datos..." />;
+    return <LoadingScreen message="Cargando tu negocio…" />;
   }
 
   if (loadError) {
@@ -282,25 +256,16 @@ const [i, g, c, t, a, gf] = await Promise.all([
         alignItems: "center",
         justifyContent: "center",
         padding: 24,
-        fontFamily: B.tS
+        fontFamily: B.font
       }}>
         <link href={FONTS_LINK} rel="stylesheet" />
         <div style={{ maxWidth: 480, width: "100%" }}>
           <ErrorBox>{loadError}</ErrorBox>
-          <div style={{ textAlign: "center", marginTop: 16 }}>
-            <button onClick={() => load()} style={B.btn}>REINTENTAR</button>
-            <button
-              onClick={() => { logout(); setAuth(false); }}
-              style={{
-                ...B.btn,
-                marginLeft: 10,
-                background: "transparent",
-                color: B.text,
-                border: `2px solid ${B.text}`
-              }}
-            >
-              CERRAR SESIÓN
-            </button>
+          <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 16 }}>
+            <Btn onClick={() => load()}>Reintentar</Btn>
+            <Btn variant="outline" onClick={() => { logout(); setAuth(false); }}>
+              Cerrar sesión
+            </Btn>
           </div>
         </div>
       </div>
@@ -315,84 +280,51 @@ const [i, g, c, t, a, gf] = await Promise.all([
       case "dashboard":
         return (
           <Dashboard
-            ingresos={ingresos}
-            gastos={gastos}
-            tramos={tramos}
-            alertas={alertas}
-            salObj={salObj}
-            setSalObj={setSalObj}
-            filtro={filtro}
-            setFiltro={setFiltro}
+            ingresos={ingresos} gastos={gastos} tramos={tramos} alertas={alertas}
+            salObj={salObj} setSalObj={setSalObj}
+            filtro={filtro} setFiltro={setFiltro}
           />
         );
       case "facturas":
         return (
           <FacturasView
-            ingresos={ingresos}
-            clientes={clientes}
-            onRefresh={load}
-            filtro={filtro}
-            setFiltro={setFiltro}
+            ingresos={ingresos} clientes={clientes} onRefresh={load}
+            filtro={filtro} setFiltro={setFiltro}
           />
         );
       case "clientes":
-        return (
-          <Clientes
-            clientes={clientes}
-            ingresos={ingresos}
-            onRefresh={load}
-          />
-        );
+        return <Clientes clientes={clientes} ingresos={ingresos} onRefresh={load} />;
       case "gastos":
         return (
           <GastosView
-            gastos={gastos}
-            gastosFijos={gastosFijos}
-            onRefresh={load}
-            filtro={filtro}
-            setFiltro={setFiltro}
+            gastos={gastos} gastosFijos={gastosFijos} onRefresh={load}
+            filtro={filtro} setFiltro={setFiltro}
           />
         );
       case "gastosfijos":
-        return (
-          <GastosFijos
-            gastosFijos={gastosFijos}
-            gastos={gastos}
-            onRefresh={load}
-          />
-        );
+        return <GastosFijos gastosFijos={gastosFijos} gastos={gastos} onRefresh={load} />;
       case "alertas":
         return (
           <AlertasView
-            alertas={alertas}
-            ingresos={ingresos}
-            gastos={gastos}
-            tramos={tramos}
+            alertas={alertas} ingresos={ingresos} gastos={gastos} tramos={tramos}
             onRefresh={refreshAll}
           />
         );
       case "simulador":
         return <Simulador />;
-case "autonomo":
+      case "autonomo":
         return (
           <CuotaAut
-            ingresos={ingresos}
-            gastos={gastos}
-            gastosFijos={gastosFijos}
-            tramos={tramos}
+            ingresos={ingresos} gastos={gastos}
+            gastosFijos={gastosFijos} tramos={tramos}
           />
         );
       default:
         return (
           <Dashboard
-            ingresos={ingresos}
-            gastos={gastos}
-            tramos={tramos}
-            alertas={alertas}
-            salObj={salObj}
-            setSalObj={setSalObj}
-            filtro={filtro}
-            setFiltro={setFiltro}
+            ingresos={ingresos} gastos={gastos} tramos={tramos} alertas={alertas}
+            salObj={salObj} setSalObj={setSalObj}
+            filtro={filtro} setFiltro={setFiltro}
           />
         );
     }
@@ -401,181 +333,217 @@ case "autonomo":
   // ============================================================
   // LAYOUT PRINCIPAL
   // ============================================================
-  const sidebarOverlay = isPhoneOrSmallTablet;
-  const sidebarWidth = open ? 240 : 0;
-
   return (
     <div style={{
-      fontFamily: B.tS,
-      color: B.text,
+      fontFamily: B.font,
+      color: B.ink,
       minHeight: "100vh",
       background: B.bg,
       position: "relative"
     }}>
       <link href={FONTS_LINK} rel="stylesheet" />
 
-      {/* HEADER */}
+      {/* HEADER — fondo sólido blanco con KanjiMark */}
       <header style={{
-        background: "rgba(255,255,255,0.82)",
-        backdropFilter: "blur(16px)",
+        background: B.surface,
         borderBottom: `1px solid ${B.border}`,
-        padding: isMobile ? "12px 16px" : "14px 24px",
+        padding: isMobile ? "12px 16px" : "14px 28px",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
         position: "sticky",
         top: 0,
-        zIndex: 100,
+        zIndex: 50,
+        height: 60,
+        boxSizing: "border-box",
         gap: 12
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
           <button
             onClick={() => setOpen(!open)}
+            aria-label="Abrir menú"
             style={{
-              background: "none",
+              background: "transparent",
               border: "none",
-              color: B.text,
+              color: B.ink,
               cursor: "pointer",
               padding: 4,
-              display: "flex"
+              display: "flex",
+              alignItems: "center"
             }}
-            aria-label="Abrir menú"
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 22, height: 22 }}>
-              <line x1="3" y1="6" x2="21" y2="6" />
-              <line x1="3" y1="12" x2="21" y2="12" />
-              <line x1="3" y1="18" x2="21" y2="18" />
-            </svg>
+            <Menu size={20} strokeWidth={2} />
           </button>
-          <span style={{
-            fontSize: isMobile ? 13 : 15,
-            fontWeight: 700,
-            fontFamily: B.tM,
-            textTransform: "uppercase",
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis"
-          }}>
-            Gestión Autónomo
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+            <KanjiMark size={isMobile ? 22 : 26} />
+            <span style={{
+              fontSize: isMobile ? 13 : 14,
+              fontWeight: 700,
+              fontFamily: B.font,
+              letterSpacing: "-0.01em",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis"
+            }}>
+              Gestión Autónomo
+            </span>
+          </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 12 }}>
           {!isMobile && (
-            <span style={{ fontSize: 12, color: B.muted, whiteSpace: "nowrap" }}>
-              {new Date().toLocaleDateString("es-ES", {
-                weekday: "long",
-                year: "numeric",
-                month: "long",
-                day: "numeric"
-              })}
-            </span>
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 12,
+              color: B.muted,
+              fontWeight: 500,
+              whiteSpace: "nowrap"
+            }}>
+              <Calendar size={13} strokeWidth={2} />
+              <span style={{ textTransform: "capitalize" }}>
+                {new Date().toLocaleDateString("es-ES", {
+                  weekday: "long",
+                  day: "numeric",
+                  month: "long"
+                })}
+              </span>
+            </div>
           )}
 
-          {/* CAMPANITA → ABRE DROPDOWN */}
           <NotificationBell
-            count={bellInfo.count}
-            maxPriority={bellInfo.maxPriority}
+            count={bellCount}
             isMobile={isMobile}
             active={dropdownOpen}
             onClick={() => setDropdownOpen(!dropdownOpen)}
           />
 
-          <button
+          <Btn
+            variant="outline"
+            size="sm"
+            icon={LogOut}
             onClick={() => { logout(); setAuth(false); }}
-            style={{
-              ...B.btn,
-              padding: isMobile ? "6px 12px" : "8px 16px",
-              fontSize: isMobile ? 10 : 11,
-              background: "transparent",
-              color: B.muted,
-              border: `1px solid ${B.border}`
-            }}
           >
-            SALIR
-          </button>
+            {isMobile ? "" : "Salir"}
+          </Btn>
         </div>
       </header>
 
-      {/* LAYOUT */}
-      <div style={{ display: "flex", position: "relative" }}>
-        {sidebarOverlay && open && (
-          <div
-            onClick={() => setOpen(false)}
-            style={{
-              position: "fixed",
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              background: "rgba(0,0,0,0.4)",
-              zIndex: 90,
-              backdropFilter: "blur(2px)"
-            }}
-          />
-        )}
+      {/* SIDEBAR OVERLAY + BACKDROP */}
+      <div
+        onClick={() => setOpen(false)}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(0,0,0,0.4)",
+          opacity: open ? 1 : 0,
+          pointerEvents: open ? "auto" : "none",
+          transition: "opacity 0.2s ease",
+          zIndex: 90
+        }}
+      />
 
-        <nav style={{
-          width: sidebarWidth,
-          overflow: "hidden",
-          background: "rgba(255,255,255,0.95)",
-          backdropFilter: "blur(16px)",
-          borderRight: `1px solid ${B.border}`,
-          transition: "width 0.3s ease",
-          minHeight: sidebarOverlay ? "100vh" : "calc(100vh - 56px)",
-          flexShrink: 0,
-          position: sidebarOverlay ? "fixed" : "static",
-          top: sidebarOverlay ? 0 : "auto",
-          left: 0,
-          zIndex: sidebarOverlay ? 95 : "auto",
-          paddingTop: sidebarOverlay ? 64 : 0
+      <aside style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        width: 280,
+        maxWidth: "85vw",
+        height: "100vh",
+        background: B.surface,
+        borderRight: `1px solid ${B.border}`,
+        transform: open ? "translateX(0)" : "translateX(-100%)",
+        transition: "transform 0.25s ease",
+        zIndex: 100,
+        display: "flex",
+        flexDirection: "column",
+        padding: 20,
+        boxSizing: "border-box"
+      }}>
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 28,
+          padding: "0 4px"
         }}>
-          <div style={{
-            padding: "20px 14px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 4
-          }}>
-            {MENU.map(m => (
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <KanjiMark size={28} />
+            <span style={{
+              fontSize: 14,
+              fontWeight: 700,
+              fontFamily: B.font,
+              letterSpacing: "-0.01em"
+            }}>
+              Gestión Autónomo
+            </span>
+          </div>
+          <button
+            onClick={() => setOpen(false)}
+            aria-label="Cerrar"
+            style={{
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              padding: 4,
+              color: B.ink,
+              display: "flex",
+              alignItems: "center"
+            }}
+          >
+            <X size={18} strokeWidth={2} />
+          </button>
+        </div>
+
+        <nav style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {MENU.map(m => {
+            const Icon = MENU_ICONS[m.iconName] || LayoutDashboard;
+            const active = page === m.id;
+            return (
               <button
                 key={m.id}
                 onClick={() => { setPage(m.id); setOpen(false); }}
                 style={{
-                  display: "block",
-                  padding: "12px 16px",
-                  borderRadius: 6,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "11px 14px",
+                  borderRadius: 12,
                   border: "none",
-                  background: page === m.id ? B.text : "transparent",
-                  color: page === m.id ? "#fff" : B.text,
-                  fontWeight: 700,
-                  fontSize: 12,
+                  background: active ? B.ink : "transparent",
+                  color: active ? "#fff" : B.ink,
+                  fontFamily: B.font,
+                  fontSize: 13,
+                  fontWeight: 600,
                   cursor: "pointer",
-                  width: "100%",
                   textAlign: "left",
-                  fontFamily: B.tM,
-                  letterSpacing: "0.06em",
+                  transition: "background 0.15s ease",
                   whiteSpace: "nowrap"
                 }}
+                onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = "#f4f4f4"; }}
+                onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}
               >
+                <Icon size={16} strokeWidth={1.75} />
                 {m.label}
               </button>
-            ))}
-          </div>
+            );
+          })}
         </nav>
+      </aside>
 
-        <main style={{
-          flex: 1,
-          padding: isMobile ? 16 : 28,
-          maxWidth: responsive.isDesktopXL ? 1400 : 920,
-          margin: "0 auto",
-          width: "100%",
-          boxSizing: "border-box"
-        }}>
-          {renderPage()}
-        </main>
-      </div>
+      {/* MAIN */}
+      <main style={{
+        padding: isMobile ? "20px 16px 48px" : "28px 32px 48px",
+        maxWidth: responsive.isDesktopXL ? 1400 : 1080,
+        margin: "0 auto",
+        width: "100%",
+        boxSizing: "border-box"
+      }}>
+        {renderPage()}
+      </main>
 
-      {/* POP-UP DE ALERTAS (solo una vez al día) */}
+      {/* POP-UP DE ALERTAS */}
       {popupAlerts.length > 0 && (
         <AlertPopup
           alertas={popupAlerts}
@@ -584,7 +552,7 @@ case "autonomo":
         />
       )}
 
-      {/* DROPDOWN DE LA CAMPANITA */}
+      {/* DROPDOWN CAMPANITA */}
       {dropdownOpen && (
         <NotificationDropdown
           alertas={pendingAlerts}
