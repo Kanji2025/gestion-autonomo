@@ -549,7 +549,7 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
           <div style={{
             display: "inline-flex",
             padding: 8,
-            background: "rgba(0,0,0,0.06)",
+            background: "rgba(0,0,0,0.0)",
             borderRadius: 999
           }}>
             <Check size={16} strokeWidth={2.5} color={B.ink} />
