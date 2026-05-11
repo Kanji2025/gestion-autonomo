@@ -82,7 +82,7 @@ function KPICard({ icon, label, value, sub }) {
       {sub && (
         <div style={{
           fontSize: B.ty.small,
-          color: B.muted,
+          color: B.ink,
           marginTop: 4,
           fontFamily: B.font
         }}>
@@ -96,7 +96,7 @@ function KPICard({ icon, label, value, sub }) {
 function BreakdownItem({ label, value, sign }) {
   return (
     <div>
-      <Lbl color="rgba(0,0,0,0.55)">{label}</Lbl>
+      <Lbl color={B.ink}>{label}</Lbl>
       <div style={{
         fontSize: B.ty.numM,
         fontWeight: 700,
@@ -116,7 +116,7 @@ function LegendDot({ color, label }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
       <span style={{ width: 9, height: 9, background: color, borderRadius: 3, display: "inline-block" }} />
-      <span style={{ fontSize: 12, color: B.muted, fontWeight: 500, fontFamily: B.font }}>{label}</span>
+      <span style={{ fontSize: 12, color: B.ink, fontWeight: 500, fontFamily: B.font }}>{label}</span>
     </div>
   );
 }
@@ -264,7 +264,7 @@ export default function Dashboard({
         </div>
         <p style={{
           fontSize: B.ty.small,
-          color: B.muted,
+          color: B.ink,
           margin: "12px 0 0",
           fontFamily: B.font,
           lineHeight: 1.5,
@@ -311,11 +311,11 @@ export default function Dashboard({
             }}>
               {diasIVA}
             </span>
-            <span style={{ fontSize: B.ty.small, color: B.muted, fontFamily: B.font }}>
+            <span style={{ fontSize: B.ty.small, color: B.ink,, fontFamily: B.font }}>
               día{diasIVA !== 1 ? "s" : ""} restante{diasIVA !== 1 ? "s" : ""}
             </span>
           </div>
-          <div style={{ marginTop: 10, fontSize: B.ty.small, color: B.muted, fontFamily: B.font }}>
+          <div style={{ marginTop: 10, fontSize: B.ty.small, color: B.ink, fontFamily: B.font }}>
             Modelo 303 · A ingresar: <strong style={{ color: B.ink, ...B.num }}>{fmt(ivaTrim)}</strong>
           </div>
           <div style={{ marginTop: 4, fontSize: 12, color: B.soft, fontFamily: B.font, textTransform: "capitalize" }}>
@@ -340,7 +340,7 @@ export default function Dashboard({
                 Tramo {tramoInfo.tramo}
               </span>
             </div>
-            <div style={{ marginTop: 10, fontSize: B.ty.small, color: B.muted, fontFamily: B.font }}>
+            <div style={{ marginTop: 10, fontSize: B.ty.small, color: B.ink, fontFamily: B.font }}>
               Pagas: <strong style={{ color: B.ink, ...B.num }}>{fmt(cuotaActual)}</strong> · Correcta: <strong style={{ color: B.ink, ...B.num }}>{fmt(tramoInfo.cuotaCorrecta)}</strong>
             </div>
             {tramoInfo.diff !== 0 && Math.abs(tramoInfo.diff) >= 1 && (
@@ -379,7 +379,7 @@ export default function Dashboard({
               color={B.ink}
             />
           </div>
-          <div style={{ marginTop: 10, fontSize: B.ty.small, color: B.muted, fontFamily: B.font }}>
+          <div style={{ marginTop: 10, fontSize: B.ty.small, color: B.ink, fontFamily: B.font }}>
             Cobrado: <strong style={{ color: B.ink, ...B.num }}>{fmt(tCob)}</strong> · Pendiente: <strong style={{ color: B.ink, ...B.num }}>{fmt(tFact - tCob)}</strong>
           </div>
         </Card>
@@ -400,11 +400,11 @@ export default function Dashboard({
             }}>
               {alertasActivas}
             </span>
-            <span style={{ fontSize: B.ty.small, color: B.muted, fontFamily: B.font }}>
+            <span style={{ fontSize: B.ty.small, color: B.ink, fontFamily: B.font }}>
               sin atender
             </span>
           </div>
-          <div style={{ marginTop: 8, fontSize: B.ty.small, color: B.muted, fontFamily: B.font }}>
+          <div style={{ marginTop: 8, fontSize: B.ty.small, color: B.ink, fontFamily: B.font }}>
             {alertasActivas > 0
               ? "Revisa la sección Alertas."
               : "Todo bajo control."}
@@ -439,7 +439,7 @@ export default function Dashboard({
             </h2>
             <p style={{
               fontSize: B.ty.small,
-              color: B.muted,
+              color: B.ink,
               margin: "4px 0 0",
               fontFamily: B.font
             }}>
@@ -496,7 +496,7 @@ export default function Dashboard({
           marginTop: 8,
           fontSize: 12,
           fontWeight: 500,
-          color: B.muted,
+          color: B.ink,
           fontFamily: B.font,
           ...B.num
         }}>
@@ -569,7 +569,7 @@ export default function Dashboard({
                     minHeight: 2
                   }} />
                 </div>
-                <span style={{ fontSize: 11, color: B.muted, fontWeight: 600, fontFamily: B.font }}>
+                <span style={{ fontSize: 11, color: B.ink, fontWeight: 600, fontFamily: B.font }}>
                   {d.mes}
                 </span>
               </div>
