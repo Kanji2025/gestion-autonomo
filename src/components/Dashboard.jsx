@@ -249,24 +249,7 @@ export default function Dashboard({
 
       {/* HUCHA DE HACIENDA — lavanda con borde negro */}
       <Card accent="lavender" style={{ overflow: "hidden", position: "relative" }}>
-        {!isMobile && (
-          <div style={{
-            position: "absolute",
-            top: -10,
-            right: 24,
-            fontSize: 80,
-            opacity: 0.08,
-            fontFamily: B.font,
-            fontWeight: 700,
-            letterSpacing: "-0.04em",
-            color: B.ink,
-            pointerEvents: "none",
-            userSelect: "none"
-          }}>
-            HACIENDA
-          </div>
-        )}
-        <Lbl>Hucha de Hacienda · Dinero intocable</Lbl>
+     <Lbl>Hucha de Hacienda · Dinero intocable</Lbl>
         <div style={{
           fontSize: B.ty.display,
           fontWeight: 700,
