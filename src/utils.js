@@ -152,7 +152,7 @@ ty: {
   },
   btnSm: {
     background: "#000000",
-    color: "#ffffff",
+    color: "#fafafa",
     border: "1px solid transparent",
     borderRadius: 999,
     padding: "8px 14px",
@@ -187,7 +187,7 @@ ty: {
     padding: "11px 14px",
     borderRadius: 12,
     border: "1px solid #ececec",
-    background: "#ffffff",
+    background: "#fafafa",
     color: "#000000",
     fontSize: 14,
     fontFamily: "'Work Sans', system-ui, sans-serif",
