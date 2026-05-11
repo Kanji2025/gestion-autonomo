@@ -411,53 +411,112 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
         </div>
       )}
 
-      {/* APARTA CADA MES — coherente con pantalla Gastos */}
-      <div style={{ background: B.text, borderRadius: 12, padding: 24, color: "#fff" }}>
-        <Lbl><span style={{ color: "rgba(255,255,255,0.6)" }}>APARTA CADA MES</span></Lbl>
-        <div style={{ fontSize: 38, fontWeight: 700, marginTop: 6, fontFamily: B.tM }}>
+      {/* APARTA CADA MES — amarillo Kanji + sub-cards soft */}
+      <div style={{
+        background: B.yellow,
+        borderRadius: 20,
+        padding: "clamp(20px, 3vw, 28px)",
+        border: `1px solid ${B.ink}`,
+        color: B.ink
+      }}>
+        <Lbl>Aparta cada mes</Lbl>
+        <div style={{
+          fontSize: B.ty.display,
+          fontWeight: 700,
+          marginTop: 8,
+          fontFamily: B.font,
+          letterSpacing: "-0.035em",
+          lineHeight: 1,
+          ...B.num
+        }}>
           {fmt(prorrateo.total)}
         </div>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 4, fontFamily: B.tS }}>
-          {activos.length} {activos.length === 1 ? "gasto fijo activo" : "gastos fijos activos"} prorrateados a mensual
+        <div style={{
+          fontSize: B.ty.small,
+          color: B.muted,
+          marginTop: 10,
+          fontFamily: B.font,
+          lineHeight: 1.5,
+          maxWidth: 460
+        }}>
+          {activos.length} {activos.length === 1 ? "gasto fijo activo" : "gastos fijos activos"} prorrateados a mensual.
         </div>
 
         <div style={{
-          marginTop: 18,
+          marginTop: 20,
           display: "grid",
           gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
           gap: 12
         }}>
           <div style={{
-            padding: "12px 14px",
-            background: "rgba(34,197,94,0.15)",
-            border: "1px solid rgba(34,197,94,0.3)",
-            borderRadius: 8
+            padding: "14px 16px",
+            background: B.greenSoft,
+            border: `1px solid ${B.green}33`,
+            borderRadius: 14
           }}>
-            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", fontFamily: B.tM, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              🟢 Reduce IRPF
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: B.ty.label,
+              color: B.green,
+              fontFamily: B.font,
+              fontWeight: 600,
+              textTransform: "uppercase",
+              letterSpacing: "0.1em"
+            }}>
+              <span style={{ width: 8, height: 8, borderRadius: 999, background: B.green, display: "inline-block" }} />
+              Reduce IRPF
             </div>
-            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: B.tM, marginTop: 4 }}>
+            <div style={{
+              fontSize: B.ty.numL,
+              fontWeight: 700,
+              fontFamily: B.font,
+              marginTop: 6,
+              color: B.ink,
+              letterSpacing: "-0.02em",
+              ...B.num
+            }}>
               {fmt(prorrateo.deducible + prorrateo.cuotaSS)}
             </div>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: 2 }}>
-              Deducibles {prorrateo.cuotaSS > 0 && `+ Cuota SS (${fmt(prorrateo.cuotaSS)})`}
+            <div style={{ fontSize: 12, color: B.muted, marginTop: 2, fontFamily: B.font }}>
+              Deducibles{prorrateo.cuotaSS > 0 && ` + Cuota SS (${fmt(prorrateo.cuotaSS)})`}
             </div>
           </div>
 
           <div style={{
-            padding: "12px 14px",
-            background: "rgba(220,38,38,0.15)",
-            border: "1px solid rgba(220,38,38,0.3)",
-            borderRadius: 8
+            padding: "14px 16px",
+            background: B.redSoft,
+            border: `1px solid ${B.red}33`,
+            borderRadius: 14
           }}>
-            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", fontFamily: B.tM, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              🔴 Solo ocupa caja
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: B.ty.label,
+              color: B.red,
+              fontFamily: B.font,
+              fontWeight: 600,
+              textTransform: "uppercase",
+              letterSpacing: "0.1em"
+            }}>
+              <span style={{ width: 8, height: 8, borderRadius: 999, background: B.red, display: "inline-block" }} />
+              Solo ocupa caja
             </div>
-            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: B.tM, marginTop: 4 }}>
+            <div style={{
+              fontSize: B.ty.numL,
+              fontWeight: 700,
+              fontFamily: B.font,
+              marginTop: 6,
+              color: B.ink,
+              letterSpacing: "-0.02em",
+              ...B.num
+            }}>
               {fmt(prorrateo.noDeducible)}
             </div>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: 2 }}>
-              No deducibles (aplazamientos, IVA fraccionado...)
+            <div style={{ fontSize: 12, color: B.muted, marginTop: 2, fontFamily: B.font }}>
+              No deducibles (aplazamientos, IVA fraccionado…)
             </div>
           </div>
         </div>
