@@ -80,9 +80,9 @@ export function ivaDeadline(quarter, year) {
 export const B = {
   // Colores base
   bg: "#fafafa",
-  surface: "#ffffff",
-  card: "#ffffff",                       // alias retrocompatibilidad
-  border: "#ececec",
+  surface: "#fafafa",
+  card: "#fafafa",                       // alias retrocompatibilidad
+  border: "#000000",
   text: "#000000",
   ink: "#000000",                        // alias semántico
   muted: "#000000",
