@@ -118,17 +118,17 @@ export const B = {
   num: { fontVariantNumeric: "tabular-nums", fontFeatureSettings: '"tnum"' },
 
   // Escala tipográfica fluida (clamp)
-  ty: {
-    display: "clamp(32px, 4.5vw, 44px)",
-    h1: "clamp(24px, 3.5vw, 32px)",
-    h1Sub: "clamp(14px, 1.5vw, 16px)",
-    heroCardNum: "clamp(24px, 3vw, 32px)",
-    h2: "clamp(17px, 2vw, 20px)",
-    numL: "clamp(22px, 2.6vw, 28px)",
-    numM: "clamp(17px, 1.9vw, 20px)",
+ty: {
+    display: "clamp(26px, 2.8vw, 32px)",
+    h1: "clamp(22px, 2.5vw, 27px)",
+    h1Sub: "clamp(13px, 1.4vw, 15px)",
+    heroCardNum: "clamp(20px, 2.4vw, 26px)",
+    h2: "clamp(16px, 1.8vw, 19px)",
+    numL: "clamp(19px, 2.1vw, 23px)",
+    numM: "clamp(15px, 1.7vw, 17px)",
     body: "15px",
-    small: "14px",
-    label: "12px"
+    small: "13px",
+    label: "11px"
   },
 
   // BOTONES — pills redondeados
