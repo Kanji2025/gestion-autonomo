@@ -1,21 +1,54 @@
 // src/components/Gastos.jsx
 // Sección de Gastos: alta manual + OCR/IA + edición + duplicado + borrado.
 // Detección AUTOMÁTICA de Gasto Fijo por proveedor.
-// "Aparta cada mes" calculado desde tabla Gastos Fijos (con separación fiscal).
+// REDISEÑO 2026: solo colores de marca.
 
 import { useState, useEffect, useRef } from "react";
+import {
+  Plus, X, Sparkles, Edit3, Copy, Trash2, Check,
+  Calendar, Repeat, Link as LinkIcon, MoreVertical
+} from "lucide-react";
+
 import { B, fmt, hoy, applyF } from "../utils.js";
 import { useResponsive } from "../hooks/useResponsive.js";
 import {
-  createRecord,
-  updateRecord,
-  deleteRecord,
-  findGastoFijoByProveedor,
-  createGastoFijo,
-  linkGastoToGastoFijo
+  createRecord, updateRecord, deleteRecord,
+  findGastoFijoByProveedor, createGastoFijo, linkGastoToGastoFijo
 } from "../api.js";
-import { Card, Lbl, Inp, Sel, SectionHeader, FilterBar, ErrorBox } from "./UI.jsx";
+import { Card, Lbl, Inp, Sel, PageHeader, FilterBar, ErrorBox, Btn } from "./UI.jsx";
 import NuevoForm from "./NuevoForm.jsx";
+
+// ============================================================
+// MENU ITEM
+// ============================================================
+function MenuItem({ icon: Icon, onClick, children }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        width: "100%",
+        padding: "10px 14px",
+        textAlign: "left",
+        background: "transparent",
+        border: "none",
+        cursor: "pointer",
+        fontSize: 13,
+        fontWeight: 500,
+        fontFamily: B.font,
+        color: B.ink,
+        transition: "background 0.15s"
+      }}
+      onMouseEnter={e => e.currentTarget.style.background = "#f4f4f4"}
+      onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+    >
+      <Icon size={15} strokeWidth={2} />
+      {children}
+    </button>
+  );
+}
 
 // ============================================================
 // MENÚ DE 3 PUNTOS
@@ -34,40 +67,25 @@ function DotMenu({ onEdit, onDuplicate, onDelete, disabled }) {
     }
   }, [open]);
 
-  const menuItemStyle = (color) => ({
-    display: "block",
-    width: "100%",
-    padding: "10px 14px",
-    textAlign: "left",
-    background: "transparent",
-    border: "none",
-    cursor: "pointer",
-    fontSize: 13,
-    fontWeight: 600,
-    fontFamily: B.tS,
-    color
-  });
-
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <button
         onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
         disabled={disabled}
         style={{
-          background: "transparent",
+          background: open ? "#f4f4f4" : "transparent",
           border: `1px solid ${B.border}`,
-          borderRadius: 4,
-          padding: "4px 10px",
+          borderRadius: 999,
+          padding: "5px 7px",
           cursor: disabled ? "not-allowed" : "pointer",
-          fontSize: 14,
-          fontWeight: 700,
-          color: B.muted,
+          color: B.ink,
           opacity: disabled ? 0.5 : 1,
-          lineHeight: 1
+          display: "flex",
+          transition: "background 0.15s ease"
         }}
         aria-label="Opciones"
       >
-        ⋮
+        <MoreVertical size={14} strokeWidth={2.25} />
       </button>
       {open && (
         <div style={{
@@ -76,21 +94,15 @@ function DotMenu({ onEdit, onDuplicate, onDelete, disabled }) {
           top: "calc(100% + 4px)",
           background: "#fff",
           border: `1px solid ${B.border}`,
-          borderRadius: 6,
-          boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-          minWidth: 140,
+          borderRadius: 12,
+          boxShadow: "0 8px 24px rgba(0,0,0,0.1)",
+          minWidth: 160,
           zIndex: 50,
           overflow: "hidden"
         }}>
-          <button onClick={() => { setOpen(false); onEdit(); }} style={menuItemStyle(B.text)}>
-            ✏️ Editar
-          </button>
-          <button onClick={() => { setOpen(false); onDuplicate(); }} style={menuItemStyle(B.purple)}>
-            📋 Duplicar
-          </button>
-          <button onClick={() => { setOpen(false); onDelete(); }} style={menuItemStyle(B.red)}>
-            🗑 Borrar
-          </button>
+          <MenuItem icon={Edit3} onClick={() => { setOpen(false); onEdit(); }}>Editar</MenuItem>
+          <MenuItem icon={Copy} onClick={() => { setOpen(false); onDuplicate(); }}>Duplicar</MenuItem>
+          <MenuItem icon={Trash2} onClick={() => { setOpen(false); onDelete(); }}>Borrar</MenuItem>
         </div>
       )}
     </div>
@@ -155,7 +167,6 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
   const fijos = fg.filter(r => ["Mensual", "Anual", "Trimestral"].includes(r.fields["Periodicidad"]));
   const vars = fg.filter(r => !["Mensual", "Anual", "Trimestral"].includes(r.fields["Periodicidad"]));
 
-  // CÁLCULO NUEVO desde tabla Gastos Fijos (no desde gastos individuales)
   const prorrateo = calcularProrrateoMensual(gastosFijos);
 
   useEffect(() => {
@@ -168,11 +179,8 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
     const timer = setTimeout(async () => {
       try {
         const found = await findGastoFijoByProveedor(prov);
-        if (found) {
-          setDetectado({ existe: true, gastoFijo: found });
-        } else {
-          setDetectado({ existe: false });
-        }
+        if (found) setDetectado({ existe: true, gastoFijo: found });
+        else setDetectado({ existe: false });
       } catch (e) {
         console.warn("Error buscando proveedor:", e);
         setDetectado(null);
@@ -235,9 +243,7 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
               moneda: form.monedaFijo,
               fechaAlta: form.fecha || hoy()
             });
-            if (nuevoFijoId) {
-              await linkGastoToGastoFijo(nuevoGastoId, nuevoFijoId);
-            }
+            if (nuevoFijoId) await linkGastoToGastoFijo(nuevoGastoId, nuevoFijoId);
           } catch (e) {
             console.warn("Gasto guardado pero no se pudo crear el Gasto Fijo:", e);
           }
@@ -291,10 +297,7 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
       };
       if (g.fields["IRPF Retenido (€)"]) copia["IRPF Retenido (€)"] = g.fields["IRPF Retenido (€)"];
       if (g.fields["Periodicidad"]) copia["Periodicidad"] = g.fields["Periodicidad"];
-
-      if (gastoFijoIds.length > 0) {
-        copia["Gasto Fijo"] = gastoFijoIds;
-      }
+      if (gastoFijoIds.length > 0) copia["Gasto Fijo"] = gastoFijoIds;
 
       await createRecord("Gastos", copia);
       await onRefresh();
@@ -311,9 +314,7 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
     }
   };
 
-  const cancelEdit = () => {
-    setEditState(null);
-  };
+  const cancelEdit = () => setEditState(null);
 
   const updateEditField = (field, value) => {
     setEditState(prev => {
@@ -338,7 +339,6 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
         "IVA Soportado (€)": ef.iva && ef.iva !== "" ? Number(ef.iva) : 0,
         "IRPF Retenido (€)": ef.irpf && ef.irpf !== "" ? Number(ef.irpf) : 0
       };
-
       await updateRecord("Gastos", id, fields);
       setEditState(null);
       await onRefresh();
@@ -346,9 +346,6 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
     setSavingEdit(false);
   };
 
-  // ============================================================
-  // RENDERS
-  // ============================================================
   if (showOCR) {
     return (
       <NuevoForm
@@ -365,20 +362,24 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
     const ef = editState.form;
     const enlazado = editState.gastoFijoIds.length > 0;
     return (
-      <Card style={{ border: `2px solid ${B.purple}`, marginTop: 8, marginBottom: 8 }}>
-        <Lbl><span style={{ color: B.purple }}>EDITAR GASTO</span></Lbl>
+      <Card style={{ border: `1px solid ${B.ink}` }}>
+        <Lbl>Editar gasto</Lbl>
         {enlazado && (
           <div style={{
-            marginTop: 10,
-            padding: "8px 12px",
-            background: B.green + "15",
-            color: "#0d6b3a",
-            borderRadius: 6,
+            marginTop: 12,
+            padding: "10px 14px",
+            background: "#f4f4f4",
+            border: `1px solid ${B.border}`,
+            borderRadius: 12,
             fontSize: 12,
-            fontFamily: B.tS,
-            fontWeight: 600
+            fontFamily: B.font,
+            color: B.ink,
+            display: "flex",
+            alignItems: "center",
+            gap: 8
           }}>
-            🔗 Este gasto está enlazado a un Gasto Fijo (la periodicidad y tipo se gestionan allí)
+            <LinkIcon size={14} strokeWidth={2} />
+            Enlazado a un Gasto Fijo. La periodicidad y tipo se gestionan allí.
           </div>
         )}
         <div style={{
@@ -389,23 +390,17 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
         }}>
           <Inp label="Concepto" value={ef.concepto} onChange={v => updateEditField("concepto", v)} />
           <Inp label="Fecha" value={ef.fecha} onChange={v => updateEditField("fecha", v)} type="date" />
-          <Inp label="Base Imponible (€)" value={ef.base} onChange={v => updateEditField("base", v)} type="number" />
-          <Inp label="IVA Soportado (€)" value={ef.iva} onChange={v => updateEditField("iva", v)} type="number" ph="0 si no lleva IVA" />
-          <Inp label="IRPF Retenido (€)" value={ef.irpf} onChange={v => updateEditField("irpf", v)} type="number" ph="0 si no aplica" />
+          <Inp label="Base imponible (€)" value={ef.base} onChange={v => updateEditField("base", v)} type="number" />
+          <Inp label="IVA soportado (€)" value={ef.iva} onChange={v => updateEditField("iva", v)} type="number" ph="0 si no lleva IVA" />
+          <Inp label="IRPF retenido (€)" value={ef.irpf} onChange={v => updateEditField("irpf", v)} type="number" ph="0 si no aplica" />
         </div>
         <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-          <button onClick={saveEdit} disabled={savingEdit} style={{ ...B.btn, flex: 1, opacity: savingEdit ? 0.5 : 1 }}>
-            {savingEdit ? "GUARDANDO..." : "GUARDAR CAMBIOS"}
-          </button>
-          <button onClick={cancelEdit} style={{
-            ...B.btn,
-            flex: 1,
-            background: "transparent",
-            color: B.text,
-            border: `2px solid ${B.text}`
-          }}>
-            CANCELAR
-          </button>
+          <Btn size="lg" onClick={saveEdit} disabled={savingEdit} style={{ flex: 1 }}>
+            {savingEdit ? "Guardando…" : "Guardar cambios"}
+          </Btn>
+          <Btn variant="outline" size="lg" onClick={cancelEdit} style={{ flex: 1 }}>
+            Cancelar
+          </Btn>
         </div>
       </Card>
     );
@@ -423,8 +418,9 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
     return (
       <div key={g.id} style={{
         padding: "14px 16px",
-        background: "rgba(0,0,0,0.03)",
-        borderRadius: 8,
+        background: "#fbfbfb",
+        border: `1px solid ${B.border}`,
+        borderRadius: 12,
         marginBottom: 8
       }}>
         <div style={{
@@ -435,30 +431,64 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
           flexWrap: "wrap"
         }}>
           <div style={{ flex: 1, minWidth: 180 }}>
-            <div style={{ fontWeight: 600, fontSize: 14, fontFamily: B.tS, display: "flex", alignItems: "center", gap: 6 }}>
-              {esFijo && <span title="Gasto fijo recurrente">🔄</span>}
+            <div style={{
+              fontWeight: 600,
+              fontSize: 14,
+              fontFamily: B.font,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              color: B.ink
+            }}>
+              {esFijo && <Repeat size={14} strokeWidth={2} />}
               {g.fields["Concepto"] || "Sin concepto"}
             </div>
-            <div style={{ fontSize: 12, color: B.muted, marginTop: 2, fontFamily: B.tM }}>
-              📅 {fecha || "Sin fecha"}
-              {showPeriod && periodo && <span> · {periodo}</span>}
+            <div style={{
+              fontSize: 12,
+              color: B.ink,
+              marginTop: 4,
+              fontFamily: B.font,
+              display: "flex",
+              alignItems: "center",
+              gap: 5
+            }}>
+              <Calendar size={11} strokeWidth={2} />
+              {fecha || "Sin fecha"}
+              {showPeriod && periodo && <span>· {periodo}</span>}
             </div>
-            <div style={{ fontSize: 11, color: B.muted, marginTop: 4, display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <span>Base: <strong style={{ color: B.text }}>{fmt(base)}</strong></span>
-              <span>IVA: {iva > 0
-                ? <strong style={{ color: B.green }}>{fmt(iva)}</strong>
-                : <span style={{ color: B.muted, fontStyle: "italic" }}>Sin IVA</span>}
+            <div style={{
+              fontSize: 12,
+              color: B.ink,
+              marginTop: 6,
+              display: "flex",
+              gap: 12,
+              flexWrap: "wrap",
+              fontFamily: B.font
+            }}>
+              <span>Base: <strong style={{ color: B.ink, ...B.num }}>{fmt(base)}</strong></span>
+              <span>
+                IVA: {iva > 0
+                  ? <strong style={{ color: B.ink, ...B.num }}>{fmt(iva)}</strong>
+                  : <span style={{ fontStyle: "italic" }}>Sin IVA</span>}
               </span>
-              {irpf > 0 && <span>IRPF: <strong style={{ color: B.red }}>{fmt(irpf)}</strong></span>}
+              {irpf > 0 && (
+                <span>IRPF: <strong style={{ color: B.ink, ...B.num }}>{fmt(irpf)}</strong></span>
+              )}
             </div>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-            <div style={{ fontWeight: 700, fontFamily: B.tM, fontSize: 15 }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+            <div style={{ fontWeight: 700, fontFamily: B.font, fontSize: 15, color: B.ink, ...B.num }}>
               {fmt(base + iva)}
             </div>
             {showPeriod && periodo && (
-              <div style={{ fontSize: 11, color: B.amber, fontWeight: 600 }}>
+              <div style={{
+                fontSize: 11,
+                color: B.ink,
+                fontWeight: 600,
+                fontFamily: B.font,
+                ...B.num
+              }}>
                 {fmt(periodo === "Mensual" ? base : periodo === "Trimestral" ? base / 3 : periodo === "Anual" ? base / 12 : base)}/mes
               </div>
             )}
@@ -476,60 +506,77 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-      <SectionHeader
-        title="Gastos y Prorrateo"
+      <PageHeader
+        title="Gastos."
+        subtitle="Lo que pagas y lo que tienes que apartar para pagar."
         action={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button onClick={() => setShowOCR(true)} style={{
-              ...B.btn,
-              background: B.purple,
-              color: "#fff"
-            }}>
-              ✨ OCR + IA
-            </button>
-            <button onClick={() => setShowFManual(!showFManual)} style={B.btn}>
-              {showFManual ? "CANCELAR" : "+ MANUAL"}
-            </button>
+            <Btn
+              icon={Sparkles}
+              iconBefore
+              onClick={() => setShowOCR(true)}
+              style={{ background: B.lavender, color: B.ink, border: `1px solid ${B.ink}` }}
+            >
+              OCR + IA
+            </Btn>
+            <Btn
+              icon={showFManual ? X : Plus}
+              iconBefore
+              onClick={() => setShowFManual(!showFManual)}
+            >
+              {showFManual ? "Cancelar" : "Manual"}
+            </Btn>
           </div>
         }
       />
 
       <FilterBar filtro={filtro} setFiltro={setFiltro} />
 
+      {/* TOAST DE DUPLICADO — amarillo Kanji */}
       {duplicadoToast && (
         <div style={{
-          background: B.green + "15",
-          border: `2px solid ${B.green}`,
-          borderRadius: 10,
+          background: B.yellow,
+          border: `1px solid ${B.ink}`,
+          borderRadius: 16,
           padding: "14px 18px",
-          color: "#0d6b3a",
-          fontFamily: B.tS,
+          color: B.ink,
+          fontFamily: B.font,
           display: "flex",
           alignItems: "center",
           gap: 12,
           flexWrap: "wrap"
         }}>
-          <div style={{ fontSize: 24 }}>✅</div>
+          <div style={{
+            display: "inline-flex",
+            padding: 8,
+            background: "rgba(0,0,0,0.06)",
+            borderRadius: 999
+          }}>
+            <Check size={16} strokeWidth={2.5} color={B.ink} />
+          </div>
           <div style={{ flex: 1, minWidth: 200 }}>
             <div style={{ fontWeight: 700, fontSize: 14 }}>
               Gasto duplicado: «{duplicadoToast.concepto}»
             </div>
             <div style={{ fontSize: 12, marginTop: 2 }}>
               Copia creada con fecha {duplicadoToast.fecha}.
-              {duplicadoToast.heredado && " 🔄 Enlazada al mismo Gasto Fijo."}
-              {" Pulsa "}<strong>⋮ → Editar</strong>{" en la copia si necesitas modificar algo."}
+              {duplicadoToast.heredado && " Enlazada al mismo Gasto Fijo."} Pulsa ⋮ → Editar en la copia si necesitas modificar algo.
             </div>
           </div>
           <button
             onClick={() => setDuplicadoToast(null)}
-            style={{ background: "transparent", border: "none", cursor: "pointer", color: "#0d6b3a", fontSize: 18, padding: 4 }}
-          >✕</button>
+            style={{ background: "transparent", border: "none", cursor: "pointer", color: B.ink, padding: 4, display: "flex" }}
+            aria-label="Cerrar"
+          >
+            <X size={16} strokeWidth={2.25} />
+          </button>
         </div>
       )}
 
+      {/* FORMULARIO MANUAL */}
       {showFManual && (
-        <Card style={{ border: `2px solid ${B.purple}` }}>
-          <Lbl>Añadir Gasto Manual</Lbl>
+        <Card style={{ border: `1px solid ${B.ink}` }}>
+          <Lbl>Añadir gasto manual</Lbl>
           <ErrorBox>{err}</ErrorBox>
           <div style={{
             display: "grid",
@@ -540,53 +587,57 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
             <Inp label="Concepto" value={form.concepto} onChange={v => setForm({ ...form, concepto: v })} ph="Ej: Suscripción Canva" />
             <Inp label="Proveedor" value={form.proveedor} onChange={v => setForm({ ...form, proveedor: v, altaComoFijo: false, esPuntual: false })} ph="Ej: Canva" />
             <Inp label="Fecha" value={form.fecha} onChange={v => setForm({ ...form, fecha: v })} type="date" />
-            <Inp label="Base Imponible (€)" value={form.base} onChange={v => setForm({ ...form, base: v })} type="number" ph="0" />
-            <Inp label="IVA Soportado (€)" value={form.iva} onChange={v => setForm({ ...form, iva: v })} type="number" ph="0 si no lleva IVA" />
-            <Inp label="IRPF Retenido (€)" value={form.irpf} onChange={v => setForm({ ...form, irpf: v })} type="number" ph="Si proveedor autónomo" />
+            <Inp label="Base imponible (€)" value={form.base} onChange={v => setForm({ ...form, base: v })} type="number" ph="0" />
+            <Inp label="IVA soportado (€)" value={form.iva} onChange={v => setForm({ ...form, iva: v })} type="number" ph="0 si no lleva IVA" />
+            <Inp label="IRPF retenido (€)" value={form.irpf} onChange={v => setForm({ ...form, irpf: v })} type="number" ph="Si proveedor autónomo" />
           </div>
 
+          {/* DETECCIÓN POR PROVEEDOR */}
           {form.proveedor.trim() && (
             <div style={{ marginTop: 18 }}>
               {buscandoProv && (
                 <div style={{
                   padding: "10px 14px",
-                  background: "rgba(0,0,0,0.04)",
-                  borderRadius: 8,
+                  background: "#f4f4f4",
+                  borderRadius: 12,
                   fontSize: 12,
-                  color: B.muted,
-                  fontFamily: B.tS
+                  color: B.ink,
+                  fontFamily: B.font
                 }}>
-                  🔍 Comprobando si «{form.proveedor.trim()}» ya está registrado como Gasto Fijo...
+                  Comprobando si «{form.proveedor.trim()}» ya está registrado como Gasto Fijo…
                 </div>
               )}
 
               {!buscandoProv && detectado?.existe && (
                 <div style={{
-                  padding: 14,
-                  background: form.esPuntual ? "rgba(0,0,0,0.03)" : B.green + "12",
-                  border: `2px solid ${form.esPuntual ? B.border : B.green}`,
-                  borderRadius: 10,
+                  padding: 16,
+                  background: form.esPuntual ? "#f4f4f4" : "#fff",
+                  border: `1px solid ${form.esPuntual ? B.border : B.ink}`,
+                  borderRadius: 14,
                   transition: "all 0.2s ease"
                 }}>
                   <div style={{
                     fontSize: 13,
                     fontWeight: 700,
-                    fontFamily: B.tS,
-                    color: form.esPuntual ? B.muted : "#0d6b3a",
+                    fontFamily: B.font,
+                    color: B.ink,
                     display: "flex",
                     alignItems: "center",
                     gap: 8,
                     flexWrap: "wrap"
                   }}>
-                    {form.esPuntual ? "❌" : "🔗"} {form.esPuntual
+                    {form.esPuntual
+                      ? <X size={15} strokeWidth={2.25} />
+                      : <LinkIcon size={15} strokeWidth={2.25} />}
+                    {form.esPuntual
                       ? `Este pago se guardará como puntual (no enlazado a «${detectado.gastoFijo.fields["Nombre"] || detectado.gastoFijo.fields["Proveedor"]}»)`
-                      : `Se enlazará automáticamente al Gasto Fijo «${detectado.gastoFijo.fields["Nombre"] || detectado.gastoFijo.fields["Proveedor"]}»`}
+                      : `Se enlazará al Gasto Fijo «${detectado.gastoFijo.fields["Nombre"] || detectado.gastoFijo.fields["Proveedor"]}»`}
                   </div>
                   <label style={{
                     display: "flex",
                     alignItems: "center",
                     gap: 10,
-                    marginTop: 12,
+                    marginTop: 14,
                     cursor: "pointer",
                     userSelect: "none"
                   }}>
@@ -594,25 +645,24 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
                       type="checkbox"
                       checked={form.esPuntual}
                       onChange={e => setForm({ ...form, esPuntual: e.target.checked })}
-                      style={{ width: 18, height: 18, accentColor: B.amber, cursor: "pointer" }}
+                      style={{ width: 18, height: 18, accentColor: B.ink, cursor: "pointer" }}
                     />
-                    <span style={{ fontSize: 13, fontWeight: 600, fontFamily: B.tS, color: B.text }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, fontFamily: B.font, color: B.ink }}>
                       Este pago es puntual (no contar como Gasto Fijo)
                     </span>
                   </label>
-                  <div style={{ fontSize: 11, color: B.muted, marginTop: 4, paddingLeft: 28 }}>
-                    Marca esto si el proveedor coincide pero este gasto NO es del recurrente
-                    (ej: compra adicional fuera de la cuota habitual).
+                  <div style={{ fontSize: 12, color: B.ink, marginTop: 4, paddingLeft: 28, fontFamily: B.font }}>
+                    Marca esto si el proveedor coincide pero este gasto NO es el recurrente.
                   </div>
                 </div>
               )}
 
               {!buscandoProv && detectado?.existe === false && (
                 <div style={{
-                  padding: 14,
-                  background: form.altaComoFijo ? B.purple + "10" : "rgba(0,0,0,0.03)",
-                  border: `2px solid ${form.altaComoFijo ? B.purple : B.border}`,
-                  borderRadius: 10,
+                  padding: 16,
+                  background: form.altaComoFijo ? "#fff" : "#fbfbfb",
+                  border: `1px solid ${form.altaComoFijo ? B.ink : B.border}`,
+                  borderRadius: 14,
                   transition: "all 0.2s ease"
                 }}>
                   <label style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", userSelect: "none" }}>
@@ -620,13 +670,22 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
                       type="checkbox"
                       checked={form.altaComoFijo}
                       onChange={e => setForm({ ...form, altaComoFijo: e.target.checked })}
-                      style={{ width: 20, height: 20, accentColor: B.purple, cursor: "pointer" }}
+                      style={{ width: 20, height: 20, accentColor: B.ink, cursor: "pointer" }}
                     />
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 700, fontSize: 14, fontFamily: B.tS }}>
-                        ➕ Dar de alta «{form.proveedor.trim()}» como Gasto Fijo
+                      <div style={{
+                        fontWeight: 700,
+                        fontSize: 14,
+                        fontFamily: B.font,
+                        color: B.ink,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6
+                      }}>
+                        <Plus size={14} strokeWidth={2.25} />
+                        Dar de alta «{form.proveedor.trim()}» como Gasto Fijo
                       </div>
-                      <div style={{ fontSize: 12, color: B.muted, marginTop: 2 }}>
+                      <div style={{ fontSize: 12, color: B.ink, marginTop: 2, fontFamily: B.font }}>
                         A partir de ahora, los pagos de este proveedor se enlazarán automáticamente.
                       </div>
                     </div>
@@ -650,89 +709,96 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
             </div>
           )}
 
-          <button onClick={save} disabled={sav} style={{
-            ...B.btn,
-            width: "100%",
-            marginTop: 16,
-            opacity: sav ? 0.5 : 1
-          }}>
-            {sav ? "GUARDANDO..." : "GUARDAR GASTO"}
-          </button>
+          <Btn onClick={save} disabled={sav} size="lg" style={{ width: "100%", marginTop: 16 }}>
+            {sav ? "Guardando…" : "Guardar gasto"}
+          </Btn>
         </Card>
       )}
 
-      {editState && (
-        <div>
-          <div style={{
-            fontSize: 11,
-            color: B.purple,
-            fontFamily: B.tM,
-            fontWeight: 700,
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
-            marginBottom: 6
-          }}>
-            ✏️ Editando gasto
-          </div>
-          <EditForm />
-        </div>
-      )}
+      {/* EDITOR INLINE */}
+      {editState && <EditForm />}
 
-      {/* APARTA CADA MES — NUEVO con separación fiscal */}
-      <div style={{ background: B.text, borderRadius: 12, padding: 24, color: "#fff" }}>
-        <Lbl><span style={{ color: "rgba(255,255,255,0.6)" }}>APARTA CADA MES</span></Lbl>
-        <div style={{ fontSize: 38, fontWeight: 700, marginTop: 6, fontFamily: B.tM }}>
+      {/* APARTA CADA MES — amarillo Kanji + dos columnas limpias */}
+      <div style={{
+        background: B.yellow,
+        borderRadius: 20,
+        padding: "clamp(22px, 3vw, 30px)",
+        border: `1px solid ${B.ink}`,
+        color: B.ink
+      }}>
+        <Lbl>Aparta cada mes</Lbl>
+        <div style={{
+          fontSize: B.ty.display,
+          fontWeight: 700,
+          marginTop: 8,
+          fontFamily: B.font,
+          letterSpacing: "-0.035em",
+          lineHeight: 1,
+          ...B.num
+        }}>
           {fmt(prorrateo.total)}
         </div>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 4, fontFamily: B.tS }}>
-          Total a apartar (todos los Gastos Fijos activos prorrateados a mensual)
+        <div style={{
+          fontSize: B.ty.small,
+          color: B.ink,
+          marginTop: 10,
+          fontFamily: B.font,
+          lineHeight: 1.5,
+          maxWidth: 480
+        }}>
+          Total a apartar — todos los Gastos Fijos activos prorrateados a mensual.
         </div>
 
         <div style={{
-          marginTop: 18,
+          marginTop: 24,
+          paddingTop: 22,
+          borderTop: `1px solid ${B.ink}22`,
           display: "grid",
           gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
-          gap: 12
+          gap: isMobile ? 22 : 32
         }}>
-          <div style={{
-            padding: "12px 14px",
-            background: "rgba(34,197,94,0.15)",
-            border: "1px solid rgba(34,197,94,0.3)",
-            borderRadius: 8
-          }}>
-            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", fontFamily: B.tM, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              🟢 Reduce IRPF
-            </div>
-            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: B.tM, marginTop: 4 }}>
+          <div>
+            <Lbl>Reduce IRPF</Lbl>
+            <div style={{
+              fontSize: B.ty.numL,
+              fontWeight: 700,
+              fontFamily: B.font,
+              marginTop: 8,
+              color: B.ink,
+              letterSpacing: "-0.015em",
+              ...B.num
+            }}>
               {fmt(prorrateo.deducible + prorrateo.cuotaSS)}
             </div>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: 2 }}>
-              Deducibles {prorrateo.cuotaSS > 0 && `+ Cuota SS (${fmt(prorrateo.cuotaSS)})`}
+            <div style={{ fontSize: 12, color: B.ink, marginTop: 4, fontFamily: B.font, lineHeight: 1.4 }}>
+              Deducibles{prorrateo.cuotaSS > 0 && ` + Cuota SS (${fmt(prorrateo.cuotaSS)})`}
             </div>
           </div>
 
-          <div style={{
-            padding: "12px 14px",
-            background: "rgba(220,38,38,0.15)",
-            border: "1px solid rgba(220,38,38,0.3)",
-            borderRadius: 8
-          }}>
-            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", fontFamily: B.tM, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              🔴 Solo ocupa caja
-            </div>
-            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: B.tM, marginTop: 4 }}>
+          <div>
+            <Lbl>Solo ocupa caja</Lbl>
+            <div style={{
+              fontSize: B.ty.numL,
+              fontWeight: 700,
+              fontFamily: B.font,
+              marginTop: 8,
+              color: B.ink,
+              letterSpacing: "-0.015em",
+              ...B.num
+            }}>
               {fmt(prorrateo.noDeducible)}
             </div>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: 2 }}>
-              No deducibles (aplazamientos, IVA fraccionado...)
+            <div style={{ fontSize: 12, color: B.ink, marginTop: 4, fontFamily: B.font, lineHeight: 1.4 }}>
+              No deducibles (aplazamientos, IVA fraccionado…)
             </div>
           </div>
         </div>
       </div>
 
+      {/* LISTAS DE GASTOS */}
       {fijos.length > 0 && (
         <Card>
-          <Lbl>Gastos Fijos del periodo ({fijos.length})</Lbl>
+          <Lbl>Gastos fijos del período ({fijos.length})</Lbl>
           <div style={{ marginTop: 14 }}>
             {fijos.map(g => renderGasto(g, true))}
           </div>
@@ -741,7 +807,7 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
 
       {vars.length > 0 && (
         <Card>
-          <Lbl>Gastos Variables ({vars.length})</Lbl>
+          <Lbl>Gastos variables ({vars.length})</Lbl>
           <div style={{ marginTop: 14 }}>
             {vars.map(g => renderGasto(g, false))}
           </div>
@@ -750,7 +816,7 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
 
       {fijos.length === 0 && vars.length === 0 && (
         <Card>
-          <p style={{ color: B.muted, fontFamily: B.tS, margin: 0 }}>
+          <p style={{ color: B.ink, fontFamily: B.font, margin: 0, fontSize: B.ty.body }}>
             No hay gastos en el período seleccionado.
           </p>
         </Card>
