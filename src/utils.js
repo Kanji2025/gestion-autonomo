@@ -85,10 +85,10 @@ export const B = {
   border: "#ececec",
   text: "#000000",
   ink: "#000000",                        // alias semántico
-  muted: "#6b6b6b",
-  inkMuted: "#6b6b6b",                   // alias
-  soft: "#a3a3a3",
-  inkSoft: "#a3a3a3",                    // alias
+  muted: "#000000",
+  inkMuted: "#000000",                   // alias
+  soft: "#000000",
+  inkSoft: "#000000",                    // alias
 
   // Acentos de marca
   yellow: "#f0e991",
