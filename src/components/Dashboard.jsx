@@ -311,7 +311,7 @@ export default function Dashboard({
             }}>
               {diasIVA}
             </span>
-            <span style={{ fontSize: B.ty.small, color: B.ink,, fontFamily: B.font }}>
+            <span style={{ fontSize: B.ty.small, color: B.ink, fontFamily: B.font }}>
               día{diasIVA !== 1 ? "s" : ""} restante{diasIVA !== 1 ? "s" : ""}
             </span>
           </div>
