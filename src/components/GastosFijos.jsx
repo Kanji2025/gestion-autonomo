@@ -411,11 +411,11 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
         </div>
       )}
 
-      {/* APARTA CADA MES — amarillo Kanji + sub-cards soft */}
+      {/* APARTA CADA MES — solo colores de marca */}
       <div style={{
         background: B.yellow,
         borderRadius: 20,
-        padding: "clamp(20px, 3vw, 28px)",
+        padding: "clamp(22px, 3vw, 30px)",
         border: `1px solid ${B.ink}`,
         color: B.ink
       }}>
@@ -439,6 +439,66 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
           lineHeight: 1.5,
           maxWidth: 460
         }}>
+          {activos.length} {activos.length === 1 ? "gasto fijo activo" : "gastos fijos activos"} prorrateados a mensual.
+        </div>
+
+        <div style={{
+          marginTop: 24,
+          paddingTop: 22,
+          borderTop: `1px solid ${B.ink}22`,
+          display: "grid",
+          gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+          gap: isMobile ? 22 : 32
+        }}>
+          <div>
+            <Lbl>Reduce IRPF</Lbl>
+            <div style={{
+              fontSize: B.ty.numL,
+              fontWeight: 700,
+              fontFamily: B.font,
+              marginTop: 8,
+              color: B.ink,
+              letterSpacing: "-0.015em",
+              ...B.num
+            }}>
+              {fmt(prorrateo.deducible + prorrateo.cuotaSS)}
+            </div>
+            <div style={{
+              fontSize: 12,
+              color: B.muted,
+              marginTop: 4,
+              fontFamily: B.font,
+              lineHeight: 1.4
+            }}>
+              Deducibles{prorrateo.cuotaSS > 0 && ` + Cuota SS (${fmt(prorrateo.cuotaSS)})`}
+            </div>
+          </div>
+
+          <div>
+            <Lbl>Solo ocupa caja</Lbl>
+            <div style={{
+              fontSize: B.ty.numL,
+              fontWeight: 700,
+              fontFamily: B.font,
+              marginTop: 8,
+              color: B.ink,
+              letterSpacing: "-0.015em",
+              ...B.num
+            }}>
+              {fmt(prorrateo.noDeducible)}
+            </div>
+            <div style={{
+              fontSize: 12,
+              color: B.muted,
+              marginTop: 4,
+              fontFamily: B.font,
+              lineHeight: 1.4
+            }}>
+              No deducibles (aplazamientos, IVA fraccionado…)
+            </div>
+          </div>
+        </div>
+      </div>
           {activos.length} {activos.length === 1 ? "gasto fijo activo" : "gastos fijos activos"} prorrateados a mensual.
         </div>
 
