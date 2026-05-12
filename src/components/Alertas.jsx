@@ -1,15 +1,22 @@
 // src/components/Alertas.jsx
-// Alertas manuales (guardadas en Airtable) + automáticas (calculadas en vivo).
-// Las automáticas se pueden descartar localmente con una "huella digital".
+// Alertas manuales (Airtable) + automáticas (calculadas en vivo, descartables localmente).
+// REDISEÑO 2026 paleta marca. LÓGICA INTACTA: huellas digitales, fingerprints, generateAutoAlerts.
 
 import { useState, useMemo } from "react";
+import {
+  Plus, X, Bell, Pin, Sparkles, AlertTriangle, ShieldCheck,
+  Calendar as CalendarIcon, Check, CheckCheck, RotateCcw, Trash2
+} from "lucide-react";
+
 import { B, fmt, hoy, getTrimestre } from "../utils.js";
 import { useResponsive } from "../hooks/useResponsive.js";
 import { createRecord, updateRecord, deleteRecord } from "../api.js";
-import { Card, Lbl, Inp, Sel, SectionHeader, ErrorBox, TxtArea } from "./UI.jsx";
+import {
+  Card, Lbl, Inp, Sel, TxtArea, PageHeader, Btn, IconPill, ErrorBox
+} from "./UI.jsx";
 
 // ============================================================
-// GESTIÓN DE DESCARTES LOCALES (para alertas automáticas)
+// GESTIÓN DE DESCARTES LOCALES (LÓGICA INTACTA)
 // ============================================================
 const DISMISS_KEY = "ga_auto_dismissed";
 
@@ -28,15 +35,12 @@ function saveDismissed(obj) {
   } catch {}
 }
 
-// Marca una alerta automática como descartada, guardando su "huella digital"
-// Si más tarde la huella cambia (ej: cambias la cuota), la alerta volverá a aparecer
 export function markAutoDismissed(alertId, fingerprint) {
   const current = loadDismissed();
   current[alertId] = { fingerprint, dismissedAt: new Date().toISOString() };
   saveDismissed(current);
 }
 
-// Comprueba si una alerta automática está descartada con la huella actual
 function isAutoDismissed(alertId, currentFingerprint) {
   const dismissed = loadDismissed();
   const entry = dismissed[alertId];
@@ -44,7 +48,6 @@ function isAutoDismissed(alertId, currentFingerprint) {
   return entry.fingerprint === currentFingerprint;
 }
 
-// Limpia entradas de descarte cuyas huellas ya no están activas (garbage collection)
 export function cleanupDismissed(activeFingerprints) {
   const current = loadDismissed();
   const cleaned = {};
@@ -57,9 +60,7 @@ export function cleanupDismissed(activeFingerprints) {
 }
 
 // ============================================================
-// GENERAR ALERTAS AUTOMÁTICAS
-// Cada alerta tiene un `fingerprint` que refleja su situación actual.
-// Si la situación cambia, el fingerprint cambia y la alerta reaparece.
+// GENERAR ALERTAS AUTOMÁTICAS (LÓGICA FISCAL INTACTA)
 // ============================================================
 export function generateAutoAlerts(ingresos, gastos, tramos, cuotaActual = 294, opts = {}) {
   const { ignoreDismissed = false } = opts;
@@ -168,7 +169,7 @@ export function generateAutoAlerts(ingresos, gastos, tramos, cuotaActual = 294, 
 }
 
 // ============================================================
-// CONVERTIR ALERTAS DE AIRTABLE A FORMATO INTERNO
+// HELPERS PÚBLICOS (LÓGICA INTACTA)
 // ============================================================
 export function airtableToAlert(record) {
   return {
@@ -186,36 +187,24 @@ export function airtableToAlert(record) {
   };
 }
 
-// ============================================================
-// OBTENER TODAS LAS ALERTAS PENDIENTES PARA EL CONTADOR Y EL DROPDOWN
-// (manuales no leídas + automáticas activas y no descartadas)
-// ============================================================
 export function getPendingAlerts(alertasAirtable, autoAlerts) {
   const now = new Date();
   const manualPending = (alertasAirtable || [])
     .map(airtableToAlert)
     .filter(a => {
       if (a.mostrada) return false;
-      // Si tiene fecha programada, solo si ya llegó el momento
       if (a.fechaHora) {
         return new Date(a.fechaHora) <= now;
       }
       return true;
     });
-
   return [...manualPending, ...autoAlerts];
 }
 
-// ============================================================
-// MARCAR MANUAL COMO LEÍDA (actualiza Airtable)
-// ============================================================
 export async function markManualRead(recordId) {
   await updateRecord("Alertas", recordId, { "Mostrada": true });
 }
 
-// ============================================================
-// MARCAR UNA ALERTA (manual o auto) COMO LEÍDA
-// ============================================================
 export async function markAlertAsRead(alert) {
   if (alert.source === "auto") {
     markAutoDismissed(alert.id, alert.fingerprint);
@@ -225,26 +214,27 @@ export async function markAlertAsRead(alert) {
 }
 
 // ============================================================
-// COLOR Y EMOJI
+// HELPERS DE PRESENTACIÓN — PALETA MARCA
 // ============================================================
-function colorForPriority(p) {
-  if (p === "Alta") return B.red;
-  if (p === "Media") return B.amber;
-  return B.muted;
+function bordeForPriority(p) {
+  // Sin verde/rojo/ámbar. Negro = urgente, amarillo = atención, gris = informativa.
+  if (p === "Alta") return B.ink;
+  if (p === "Media") return B.yellow;
+  return B.border;
 }
 
-function emojiForType(t) {
+function iconForType(t) {
   switch (t) {
-    case "Factura Vencida": return "⚠️";
-    case "IVA Trimestre": return "💰";
-    case "Cuota Autónomos": return "🏛️";
-    case "Manual": return "📌";
-    default: return "🔔";
+    case "Factura Vencida": return AlertTriangle;
+    case "IVA Trimestre": return CalendarIcon;
+    case "Cuota Autónomos": return ShieldCheck;
+    case "Manual": return Pin;
+    default: return Bell;
   }
 }
 
 // ============================================================
-// COMPONENTE PRINCIPAL (VISTA DE ALERTAS EN EL MENÚ)
+// COMPONENTE PRINCIPAL
 // ============================================================
 export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefresh }) {
   const { isMobile, formColumns } = useResponsive();
@@ -256,12 +246,10 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
   const [markingAll, setMarkingAll] = useState(false);
   const [err, setErr] = useState("");
 
-  // Cuota actual (se guarda en localStorage desde la vista de Cuota Autónomos)
   const cuotaActual = (() => {
     try { return Number(localStorage.getItem("ga_cuota")) || 294; } catch { return 294; }
   })();
 
-  // Fecha por defecto: dentro de 1 hora
   const fechaPorDefecto = (() => {
     const d = new Date();
     d.setHours(d.getHours() + 1);
@@ -276,20 +264,16 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
     prioridad: "Media"
   });
 
-  // Alertas automáticas: mostramos TODAS las activas (incluso las descartadas)
-  // para que María pueda ver también las que ya descartó
   const autoAlertsAll = useMemo(() => {
     return generateAutoAlerts(ingresos, gastos, tramos, cuotaActual, { ignoreDismissed: true });
   }, [ingresos, gastos, tramos, cuotaActual]);
 
-  // Saber cuáles están descartadas localmente
   const dismissedMap = loadDismissed();
   const autoAlertsWithStatus = autoAlertsAll.map(a => ({
     ...a,
     descartadaLocal: dismissedMap[a.id]?.fingerprint === a.fingerprint
   }));
 
-  // Alertas manuales ordenadas por fecha
   const manualAlerts = useMemo(() => {
     return (alertas || []).map(airtableToAlert).sort((a, b) => {
       if (!a.fechaHora) return 1;
@@ -299,7 +283,7 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
   }, [alertas]);
 
   // ============================================================
-  // ACCIONES
+  // ACCIONES (LÓGICA INTACTA)
   // ============================================================
   const guardar = async () => {
     if (!form.titulo.trim()) {
@@ -308,7 +292,6 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
     }
     setErr("");
     setSaving(true);
-
     try {
       const fields = {
         "Título": form.titulo.trim(),
@@ -320,7 +303,6 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
       if (form.fechaHora) {
         fields["Fecha y Hora"] = new Date(form.fechaHora).toISOString();
       }
-
       await createRecord("Alertas", fields);
       setForm({ titulo: "", mensaje: "", fechaHora: fechaPorDefecto, prioridad: "Media" });
       setShowAdd(false);
@@ -366,11 +348,9 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
   };
 
   const reactivarAuto = (alertId) => {
-    // Quitar el descarte local
     const current = loadDismissed();
     delete current[alertId];
     saveDismissed(current);
-    // Forzar un re-render
     onRefresh();
   };
 
@@ -378,15 +358,11 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
     const pendientesManual = manualAlerts.filter(a => !a.mostrada);
     const pendientesAuto = autoAlertsWithStatus.filter(a => !a.descartadaLocal);
     const total = pendientesManual.length + pendientesAuto.length;
-
     if (total === 0) return;
     if (!confirm(`¿Marcar las ${total} alertas pendientes como leídas?`)) return;
-
     setMarkingAll(true);
     try {
-      // Manuales: actualizar en Airtable en paralelo
       await Promise.all(pendientesManual.map(a => markManualRead(a.id)));
-      // Automáticas: descartar local
       for (const a of pendientesAuto) {
         markAutoDismissed(a.id, a.fingerprint);
       }
@@ -408,8 +384,8 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
   // RENDER ITEM
   // ============================================================
   const renderItem = (a, isAuto) => {
-    const color = colorForPriority(a.prioridad);
-    const emoji = emojiForType(a.tipo);
+    const Icon = iconForType(a.tipo);
+    const borderColor = bordeForPriority(a.prioridad);
     const isRead = isAuto ? a.descartadaLocal : a.mostrada;
     const isMarking = markingId === a.id;
 
@@ -417,13 +393,13 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
       <div
         key={a.id}
         style={{
-          background: B.card,
-          backdropFilter: "blur(14px)",
-          borderRadius: 10,
-          padding: 18,
+          background: B.surface,
+          borderRadius: 16,
           border: `1px solid ${B.border}`,
-          borderLeft: `4px solid ${color}`,
-          opacity: isRead ? 0.55 : 1
+          borderLeft: `4px solid ${borderColor}`,
+          padding: "16px 18px",
+          opacity: isRead ? 0.55 : 1,
+          transition: "opacity 0.2s ease"
         }}
       >
         <div style={{
@@ -432,127 +408,167 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
           alignItems: "flex-start",
           flexWrap: "wrap"
         }}>
-          <div style={{ fontSize: 24 }}>{emoji}</div>
+          <IconPill icon={Icon} size={36} />
+
           <div style={{ flex: 1, minWidth: 200 }}>
+            {/* Meta chips */}
             <div style={{
-              fontSize: 11,
-              color: color,
-              fontWeight: 700,
-              fontFamily: B.tM,
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
               display: "flex",
-              gap: 8,
+              gap: 6,
               alignItems: "center",
-              flexWrap: "wrap"
+              flexWrap: "wrap",
+              marginBottom: 6
             }}>
-              <span>{a.tipo}</span>
-              <span style={{ color: B.muted }}>·</span>
-              <span style={{ color: B.muted }}>{a.prioridad}</span>
+              <span style={{
+                fontSize: 10,
+                color: B.ink,
+                fontWeight: 600,
+                fontFamily: B.font,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em"
+              }}>
+                {a.tipo}
+              </span>
+              <span style={{ color: B.muted, fontSize: 10 }}>·</span>
+              <span style={{
+                fontSize: 10,
+                color: B.muted,
+                fontWeight: 600,
+                fontFamily: B.font,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em"
+              }}>
+                {a.prioridad}
+              </span>
               {isAuto && (
-                <>
-                  <span style={{ color: B.muted }}>·</span>
-                  <span style={{
-                    color: B.purple,
-                    background: B.purple + "15",
-                    padding: "2px 6px",
-                    borderRadius: 3
-                  }}>
-                    AUTO
-                  </span>
-                </>
+                <span style={{
+                  background: B.lavender,
+                  color: B.ink,
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                  fontSize: 10,
+                  fontWeight: 600,
+                  fontFamily: B.font,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4
+                }}>
+                  <Sparkles size={10} strokeWidth={2.25} />
+                  Auto
+                </span>
               )}
               {isRead && (
-                <>
-                  <span style={{ color: B.muted }}>·</span>
-                  <span style={{ color: B.muted }}>LEÍDA</span>
-                </>
+                <span style={{
+                  background: B.border,
+                  color: B.muted,
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                  fontSize: 10,
+                  fontWeight: 600,
+                  fontFamily: B.font,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em"
+                }}>
+                  Leída
+                </span>
               )}
             </div>
+
+            {/* Título */}
             <div style={{
-              fontSize: 15,
+              fontSize: 16,
               fontWeight: 700,
-              color: B.text,
-              marginTop: 4,
-              fontFamily: B.tS
+              color: B.ink,
+              fontFamily: B.font,
+              letterSpacing: "-0.015em",
+              lineHeight: 1.3
             }}>
               {a.titulo}
             </div>
+
+            {/* Mensaje */}
             {a.mensaje && (
               <div style={{
                 fontSize: 13,
                 color: B.muted,
                 marginTop: 6,
-                fontFamily: B.tS,
-                lineHeight: 1.5,
+                fontFamily: B.font,
+                lineHeight: 1.55,
                 whiteSpace: "pre-wrap"
               }}>
                 {a.mensaje}
               </div>
             )}
+
+            {/* Fecha */}
             {a.fecha && (
               <div style={{
                 fontSize: 11,
                 color: B.muted,
-                marginTop: 8,
-                fontFamily: B.tM
+                marginTop: 10,
+                fontFamily: B.font,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                ...B.num
               }}>
+                <CalendarIcon size={11} strokeWidth={2} />
                 {a.fecha}
               </div>
             )}
           </div>
 
+          {/* Acciones */}
           <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
             {!isRead && (
-              <button
+              <Btn
+                size="sm"
+                variant="outline"
                 onClick={() => marcarLeida(a)}
                 disabled={isMarking}
-                style={{
-                  ...B.btnSm,
-                  background: "transparent",
-                  color: B.green,
-                  border: `1px solid ${B.green}`,
-                  opacity: isMarking ? 0.5 : 1
-                }}
+                icon={Check}
+                iconBefore
               >
-                {isMarking ? "..." : "✓ LEÍDA"}
-              </button>
+                {isMarking ? "…" : "Leída"}
+              </Btn>
             )}
             {isRead && !isAuto && (
-              <button
+              <Btn
+                size="sm"
+                variant="outline"
                 onClick={() => reactivar(a.id)}
                 disabled={isMarking}
-                style={{
-                  ...B.btnSm,
-                  background: "transparent",
-                  color: B.purple,
-                  border: `1px solid ${B.purple}`
-                }}
+                icon={RotateCcw}
+                iconBefore
               >
-                REACTIVAR
-              </button>
+                Reactivar
+              </Btn>
             )}
             {isRead && isAuto && (
-              <button
+              <Btn
+                size="sm"
+                variant="outline"
                 onClick={() => reactivarAuto(a.id)}
-                style={{
-                  ...B.btnSm,
-                  background: "transparent",
-                  color: B.purple,
-                  border: `1px solid ${B.purple}`
-                }}
+                icon={RotateCcw}
+                iconBefore
               >
-                REACTIVAR
-              </button>
+                Reactivar
+              </Btn>
             )}
             {!isAuto && (
-              <button
+              <Btn
+                size="sm"
+                variant="ghost"
                 onClick={() => borrar(a.id)}
                 disabled={delId === a.id}
-                style={{ ...B.btnDel, opacity: delId === a.id ? 0.5 : 1 }}
+                icon={Trash2}
+                iconBefore
+                style={{ color: B.muted }}
               >
-                BORRAR
-              </button>
+                {delId === a.id ? "…" : "Borrar"}
+              </Btn>
             )}
           </div>
         </div>
@@ -560,43 +576,51 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
     );
   };
 
+  // ============================================================
+  // RENDER PRINCIPAL
+  // ============================================================
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <SectionHeader
-        title="Alertas"
+    <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+      <PageHeader
+        title="Alertas."
+        subtitle="Recordatorios automáticos de Hacienda y los que tú programas."
         action={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {totalPendientes > 1 && (
-              <button
+              <Btn
                 onClick={marcarTodasLeidas}
                 disabled={markingAll}
-                style={{
-                  ...B.btn,
-                  background: "transparent",
-                  color: B.green,
-                  border: `2px solid ${B.green}`,
-                  opacity: markingAll ? 0.5 : 1
-                }}
+                variant="outline"
+                icon={CheckCheck}
+                iconBefore
               >
-                {markingAll ? "..." : `✓ MARCAR ${totalPendientes} LEÍDAS`}
-              </button>
+                {markingAll ? "…" : `Marcar ${totalPendientes} leídas`}
+              </Btn>
             )}
-            <button onClick={() => setShowAdd(!showAdd)} style={B.btn}>
-              {showAdd ? "CANCELAR" : "+ NUEVA ALERTA"}
-            </button>
+            <Btn
+              onClick={() => setShowAdd(!showAdd)}
+              icon={showAdd ? X : Plus}
+              iconBefore
+              variant={showAdd ? "outline" : "primary"}
+            >
+              {showAdd ? "Cancelar" : "Nueva alerta"}
+            </Btn>
           </div>
         }
       />
 
+      {/* FORMULARIO NUEVA ALERTA */}
       {showAdd && (
-        <Card style={{ border: `2px solid ${B.purple}` }}>
-          <Lbl>Programar Alerta Manual</Lbl>
-          <ErrorBox>{err}</ErrorBox>
+        <Card style={{ border: `1px solid ${B.ink}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+            <IconPill icon={Pin} size={28} />
+            <Lbl>Programar alerta manual</Lbl>
+          </div>
+          {err && <div style={{ marginBottom: 14 }}><ErrorBox>{err}</ErrorBox></div>}
           <div style={{
             display: "grid",
             gridTemplateColumns: `repeat(${formColumns}, 1fr)`,
-            gap: 14,
-            marginTop: 14
+            gap: 14
           }}>
             <div style={{ gridColumn: formColumns === 1 ? "auto" : "span 2" }}>
               <Inp
@@ -607,7 +631,7 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
               />
             </div>
             <Inp
-              label="Fecha y Hora"
+              label="Fecha y hora"
               value={form.fechaHora}
               onChange={v => setForm({ ...form, fechaHora: v })}
               type="datetime-local"
@@ -623,90 +647,118 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
                 label="Mensaje"
                 value={form.mensaje}
                 onChange={v => setForm({ ...form, mensaje: v })}
-                ph="Detalles de la alerta..."
+                ph="Detalles de la alerta…"
                 rows={3}
               />
             </div>
           </div>
-          <button
-            onClick={guardar}
-            disabled={saving}
-            style={{ ...B.btn, width: "100%", marginTop: 16, opacity: saving ? 0.5 : 1 }}
-          >
-            {saving ? "GUARDANDO..." : "GUARDAR ALERTA"}
-          </button>
+          <div style={{ marginTop: 16 }}>
+            <Btn
+              onClick={guardar}
+              disabled={saving}
+              icon={Check}
+              iconBefore
+              style={{ width: "100%" }}
+            >
+              {saving ? "Guardando…" : "Guardar alerta"}
+            </Btn>
+          </div>
         </Card>
       )}
 
-      {/* Resumen */}
+      {/* RESUMEN — 3 KPIs */}
       <div style={{
         display: "grid",
         gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(3, 1fr)",
         gap: 12
       }}>
-        <div style={{
-          background: B.card,
-          padding: "14px 16px",
-          borderRadius: 8,
-          border: `1px solid ${B.border}`
-        }}>
-          <div style={{ fontSize: 11, color: B.muted, fontFamily: B.tM, textTransform: "uppercase" }}>
-            Pendientes
+        <Card>
+          <IconPill icon={Bell} />
+          <div style={{ marginTop: 14 }}>
+            <Lbl>Pendientes</Lbl>
           </div>
-          <div style={{ fontSize: 22, fontWeight: 700, fontFamily: B.tM, color: totalPendientes > 0 ? B.amber : B.green }}>
+          <div style={{
+            fontSize: B.ty.numL,
+            fontWeight: 700,
+            marginTop: 6,
+            color: B.ink,
+            letterSpacing: "-0.02em",
+            fontFamily: B.font,
+            ...B.num
+          }}>
             {totalPendientes}
           </div>
-        </div>
-        <div style={{
-          background: B.card,
-          padding: "14px 16px",
-          borderRadius: 8,
-          border: `1px solid ${B.border}`
-        }}>
-          <div style={{ fontSize: 11, color: B.muted, fontFamily: B.tM, textTransform: "uppercase" }}>
-            Automáticas
+          <div style={{ fontSize: B.ty.small, color: B.muted, marginTop: 4, fontFamily: B.font }}>
+            Sin leer
           </div>
-          <div style={{ fontSize: 22, fontWeight: 700, fontFamily: B.tM, color: B.purple }}>
+        </Card>
+
+        <Card>
+          <IconPill icon={Sparkles} />
+          <div style={{ marginTop: 14 }}>
+            <Lbl>Automáticas</Lbl>
+          </div>
+          <div style={{
+            fontSize: B.ty.numL,
+            fontWeight: 700,
+            marginTop: 6,
+            color: B.ink,
+            letterSpacing: "-0.02em",
+            fontFamily: B.font,
+            ...B.num
+          }}>
             {autoAlertsWithStatus.length}
           </div>
-        </div>
+          <div style={{ fontSize: B.ty.small, color: B.muted, marginTop: 4, fontFamily: B.font }}>
+            Calculadas en vivo
+          </div>
+        </Card>
+
         {!isMobile && (
-          <div style={{
-            background: B.card,
-            padding: "14px 16px",
-            borderRadius: 8,
-            border: `1px solid ${B.border}`
-          }}>
-            <div style={{ fontSize: 11, color: B.muted, fontFamily: B.tM, textTransform: "uppercase" }}>
-              Manuales
+          <Card>
+            <IconPill icon={Pin} />
+            <div style={{ marginTop: 14 }}>
+              <Lbl>Manuales</Lbl>
             </div>
-            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: B.tM, color: B.text }}>
+            <div style={{
+              fontSize: B.ty.numL,
+              fontWeight: 700,
+              marginTop: 6,
+              color: B.ink,
+              letterSpacing: "-0.02em",
+              fontFamily: B.font,
+              ...B.num
+            }}>
               {manualAlerts.length}
             </div>
-          </div>
+            <div style={{ fontSize: B.ty.small, color: B.muted, marginTop: 4, fontFamily: B.font }}>
+              Programadas por ti
+            </div>
+          </Card>
         )}
       </div>
 
-      {/* Sección automáticas */}
+      {/* SECCIÓN AUTOMÁTICAS */}
       {autoAlertsWithStatus.length > 0 && (
-        <>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <Lbl>Automáticas (calculadas en vivo)</Lbl>
           {autoAlertsWithStatus.map(a => renderItem(a, true))}
-        </>
+        </div>
       )}
 
-      {/* Sección manuales */}
+      {/* SECCIÓN MANUALES */}
       {manualAlerts.length > 0 && (
-        <>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <Lbl>Programadas por ti</Lbl>
           {manualAlerts.map(a => renderItem(a, false))}
-        </>
+        </div>
       )}
 
+      {/* VACÍO */}
       {autoAlertsWithStatus.length === 0 && manualAlerts.length === 0 && (
         <Card>
-          <p style={{ color: B.muted, fontFamily: B.tS, margin: 0 }}>
-            No hay alertas activas. Todo está bajo control. 🎉
+          <p style={{ color: B.muted, fontFamily: B.font, margin: 0, fontSize: 14 }}>
+            No hay alertas activas. Todo está bajo control.
           </p>
         </Card>
       )}
