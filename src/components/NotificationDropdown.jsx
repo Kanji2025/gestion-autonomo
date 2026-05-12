@@ -1,29 +1,33 @@
 // src/components/NotificationDropdown.jsx
-// Panel flotante que aparece al pulsar la campana.
-// Muestra las alertas pendientes (manuales + automáticas no descartadas).
-// Adaptativo: pequeño en escritorio, pantalla completa en móvil.
+// Panel flotante de la campana del header. REDISEÑO 2026 paleta marca.
+// LÓGICA INTACTA: marcar leída/todas, navegar a Alertas, responsive móvil.
 
 import { useState, useEffect, useRef } from "react";
+import {
+  X, Check, CheckCheck, ArrowRight, CheckCircle2, Sparkles,
+  Bell, Pin, AlertTriangle, ShieldCheck, Calendar as CalendarIcon
+} from "lucide-react";
+
 import { B } from "../utils.js";
 import { useResponsive } from "../hooks/useResponsive.js";
 import { markAlertAsRead, markManualRead, markAutoDismissed } from "./Alertas.jsx";
 
 // ============================================================
-// COLOR Y EMOJI (los mismos que Alertas.jsx)
+// HELPERS DE PRESENTACIÓN (paleta marca, igual que Alertas.jsx)
 // ============================================================
-function colorForPriority(p) {
-  if (p === "Alta") return B.red;
-  if (p === "Media") return B.amber;
-  return B.muted;
+function bordeForPriority(p) {
+  if (p === "Alta") return B.ink;
+  if (p === "Media") return B.yellow;
+  return B.border;
 }
 
-function emojiForType(t) {
+function iconForType(t) {
   switch (t) {
-    case "Factura Vencida": return "⚠️";
-    case "IVA Trimestre": return "💰";
-    case "Cuota Autónomos": return "🏛️";
-    case "Manual": return "📌";
-    default: return "🔔";
+    case "Factura Vencida": return AlertTriangle;
+    case "IVA Trimestre": return CalendarIcon;
+    case "Cuota Autónomos": return ShieldCheck;
+    case "Manual": return Pin;
+    default: return Bell;
   }
 }
 
@@ -36,22 +40,20 @@ export default function NotificationDropdown({
   onGoToAlerts,
   onChange
 }) {
-  const { isMobile, isPhoneOrSmallTablet } = useResponsive();
+  const { isPhoneOrSmallTablet } = useResponsive();
   const [markingId, setMarkingId] = useState(null);
   const [markingAll, setMarkingAll] = useState(false);
   const panelRef = useRef(null);
 
-  // Cerrar al hacer click fuera (solo en escritorio; en móvil hay overlay explícito)
+  // Cerrar al hacer click fuera (solo escritorio)
   useEffect(() => {
     if (isPhoneOrSmallTablet) return;
     function handleClickOutside(e) {
       if (panelRef.current && !panelRef.current.contains(e.target)) {
-        // Ignorar clicks en la campana (tienen data-bell-button)
         if (e.target.closest("[data-bell-button]")) return;
         onClose();
       }
     }
-    // Pequeño delay para evitar cerrar por el click que abrió
     const timer = setTimeout(() => {
       document.addEventListener("mousedown", handleClickOutside);
     }, 50);
@@ -61,7 +63,7 @@ export default function NotificationDropdown({
     };
   }, [onClose, isPhoneOrSmallTablet]);
 
-  // Cerrar con tecla Escape
+  // Cerrar con Escape
   useEffect(() => {
     function handleEscape(e) {
       if (e.key === "Escape") onClose();
@@ -86,7 +88,6 @@ export default function NotificationDropdown({
     try {
       const manuales = alertas.filter(a => a.source === "airtable");
       const autos = alertas.filter(a => a.source === "auto");
-
       await Promise.all(manuales.map(a => markManualRead(a.id)));
       for (const a of autos) {
         markAutoDismissed(a.id, a.fingerprint);
@@ -104,16 +105,12 @@ export default function NotificationDropdown({
   };
 
   // ============================================================
-  // ESTILOS DE CONTENEDOR SEGÚN DISPOSITIVO
+  // ESTILOS DE CONTENEDOR
   // ============================================================
   const containerStyle = isPhoneOrSmallTablet
     ? {
-        // Móvil / tablet vertical: pantalla casi completa desde arriba
         position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
+        top: 0, left: 0, right: 0, bottom: 0,
         zIndex: 200,
         background: "rgba(0,0,0,0.45)",
         backdropFilter: "blur(2px)",
@@ -123,12 +120,11 @@ export default function NotificationDropdown({
         paddingTop: 60
       }
     : {
-        // Escritorio: panel flotante debajo de la campana
         position: "fixed",
         top: 64,
         right: 20,
         zIndex: 200,
-        width: 360,
+        width: 380,
         maxHeight: "calc(100vh - 100px)"
       };
 
@@ -136,18 +132,19 @@ export default function NotificationDropdown({
     ? {
         background: "#fff",
         margin: "0 12px",
-        borderRadius: 12,
+        borderRadius: 20,
         maxHeight: "calc(100vh - 80px)",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
-        boxShadow: "0 20px 60px rgba(0,0,0,0.3)"
+        boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+        border: `1px solid ${B.border}`
       }
     : {
         background: "#fff",
-        borderRadius: 12,
+        borderRadius: 20,
         border: `1px solid ${B.border}`,
-        boxShadow: "0 12px 40px rgba(0,0,0,0.15)",
+        boxShadow: "0 12px 40px rgba(0,0,0,0.10)",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
@@ -156,36 +153,34 @@ export default function NotificationDropdown({
 
   return (
     <div style={containerStyle} onClick={isPhoneOrSmallTablet ? onClose : undefined}>
-      <div
-        ref={panelRef}
-        style={panelStyle}
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Cabecera */}
+      <div ref={panelRef} style={panelStyle} onClick={e => e.stopPropagation()}>
+        {/* CABECERA */}
         <div style={{
-          padding: "14px 16px",
+          padding: "16px 18px",
           borderBottom: `1px solid ${B.border}`,
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          background: "rgba(0,0,0,0.02)"
+          background: "#fafafa"
         }}>
           <div>
             <div style={{
-              fontSize: 11,
+              fontSize: 10,
               color: B.muted,
-              fontFamily: B.tM,
+              fontFamily: B.font,
               textTransform: "uppercase",
               letterSpacing: "0.08em",
-              fontWeight: 700
+              fontWeight: 600
             }}>
               Notificaciones
             </div>
             <div style={{
-              fontSize: 14,
+              fontSize: 15,
               fontWeight: 700,
-              fontFamily: B.tS,
-              marginTop: 2
+              fontFamily: B.font,
+              marginTop: 3,
+              color: B.ink,
+              letterSpacing: "-0.01em"
             }}>
               {alertas.length === 0
                 ? "Todo bajo control"
@@ -198,96 +193,145 @@ export default function NotificationDropdown({
               background: "transparent",
               border: "none",
               cursor: "pointer",
-              fontSize: 20,
               color: B.muted,
               padding: 4,
-              lineHeight: 1
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center"
             }}
             aria-label="Cerrar"
           >
-            ✕
+            <X size={18} strokeWidth={2} />
           </button>
         </div>
 
-        {/* Lista de alertas (con scroll) */}
-        <div style={{
-          flex: 1,
-          overflowY: "auto",
-          WebkitOverflowScrolling: "touch"
-        }}>
+        {/* LISTA */}
+        <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
           {alertas.length === 0 ? (
             <div style={{
-              padding: "40px 20px",
+              padding: "44px 20px",
               textAlign: "center",
               color: B.muted,
-              fontSize: 13,
-              fontFamily: B.tS
+              fontSize: 14,
+              fontFamily: B.font,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 14
             }}>
-              <div style={{ fontSize: 42, marginBottom: 10 }}>🎉</div>
-              <div>No hay alertas pendientes</div>
+              <div style={{
+                width: 56,
+                height: 56,
+                borderRadius: 999,
+                background: B.yellow,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center"
+              }}>
+                <CheckCircle2 size={26} strokeWidth={2} color={B.ink} />
+              </div>
+              <div style={{ color: B.ink, fontWeight: 600 }}>
+                No hay alertas pendientes
+              </div>
             </div>
           ) : (
             alertas.map(a => {
-              const color = colorForPriority(a.prioridad);
-              const emoji = emojiForType(a.tipo);
+              const Icon = iconForType(a.tipo);
+              const borderColor = bordeForPriority(a.prioridad);
               const isMarking = markingId === a.id;
 
               return (
                 <div
                   key={a.id}
                   style={{
-                    padding: "12px 14px",
+                    padding: "14px 16px",
                     borderBottom: `1px solid ${B.border}`,
-                    borderLeft: `3px solid ${color}`,
+                    borderLeft: `3px solid ${borderColor}`,
                     transition: "background 0.15s ease"
                   }}
                 >
-                  <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                    <div style={{ fontSize: 18, lineHeight: 1.2 }}>{emoji}</div>
+                  <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                    <div style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 999,
+                      background: "#f4f4f4",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0
+                    }}>
+                      <Icon size={15} strokeWidth={1.75} color={B.ink} />
+                    </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
+                      {/* Meta chips */}
                       <div style={{
-                        fontSize: 10,
-                        color: color,
-                        fontWeight: 700,
-                        fontFamily: B.tM,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.06em",
                         display: "flex",
-                        gap: 6,
+                        gap: 5,
                         alignItems: "center",
                         flexWrap: "wrap"
                       }}>
-                        <span>{a.tipo}</span>
-                        <span style={{ color: B.muted }}>·</span>
-                        <span style={{ color: B.muted }}>{a.prioridad}</span>
+                        <span style={{
+                          fontSize: 9,
+                          color: B.ink,
+                          fontWeight: 600,
+                          fontFamily: B.font,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.08em"
+                        }}>
+                          {a.tipo}
+                        </span>
+                        <span style={{ color: B.muted, fontSize: 9 }}>·</span>
+                        <span style={{
+                          fontSize: 9,
+                          color: B.muted,
+                          fontWeight: 600,
+                          fontFamily: B.font,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.08em"
+                        }}>
+                          {a.prioridad}
+                        </span>
                         {a.source === "auto" && (
                           <span style={{
-                            color: B.purple,
-                            background: B.purple + "15",
-                            padding: "1px 5px",
-                            borderRadius: 3,
-                            fontSize: 9
+                            background: B.lavender,
+                            color: B.ink,
+                            padding: "1px 7px",
+                            borderRadius: 999,
+                            fontSize: 9,
+                            fontWeight: 600,
+                            fontFamily: B.font,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.06em",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 3
                           }}>
-                            AUTO
+                            <Sparkles size={9} strokeWidth={2.25} />
+                            Auto
                           </span>
                         )}
                       </div>
+                      {/* Título */}
                       <div style={{
-                        fontSize: 13,
-                        fontWeight: 600,
-                        color: B.text,
-                        marginTop: 2,
-                        fontFamily: B.tS
+                        fontSize: 14,
+                        fontWeight: 700,
+                        color: B.ink,
+                        marginTop: 4,
+                        fontFamily: B.font,
+                        letterSpacing: "-0.01em",
+                        lineHeight: 1.3
                       }}>
                         {a.titulo}
                       </div>
+                      {/* Mensaje (truncado 2 líneas) */}
                       {a.mensaje && (
                         <div style={{
                           fontSize: 12,
                           color: B.muted,
                           marginTop: 4,
-                          fontFamily: B.tS,
-                          lineHeight: 1.4,
+                          fontFamily: B.font,
+                          lineHeight: 1.5,
                           display: "-webkit-box",
                           WebkitLineClamp: 2,
                           WebkitBoxOrient: "vertical",
@@ -296,26 +340,29 @@ export default function NotificationDropdown({
                           {a.mensaje}
                         </div>
                       )}
+                      {/* Botón "Leída" */}
                       <button
                         onClick={() => marcarUna(a)}
                         disabled={isMarking}
                         style={{
-                          marginTop: 8,
-                          padding: "5px 10px",
-                          fontSize: 10,
-                          fontWeight: 700,
-                          fontFamily: B.tM,
-                          textTransform: "uppercase",
-                          letterSpacing: "0.06em",
+                          marginTop: 10,
+                          padding: "5px 12px",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          fontFamily: B.font,
                           background: "transparent",
-                          color: B.green,
-                          border: `1px solid ${B.green}`,
-                          borderRadius: 4,
-                          cursor: "pointer",
-                          opacity: isMarking ? 0.5 : 1
+                          color: B.ink,
+                          border: `1px solid ${B.border}`,
+                          borderRadius: 999,
+                          cursor: isMarking ? "not-allowed" : "pointer",
+                          opacity: isMarking ? 0.5 : 1,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 5
                         }}
                       >
-                        {isMarking ? "..." : "✓ Marcar leída"}
+                        <Check size={11} strokeWidth={2.25} />
+                        {isMarking ? "…" : "Leída"}
                       </button>
                     </div>
                   </div>
@@ -325,15 +372,15 @@ export default function NotificationDropdown({
           )}
         </div>
 
-        {/* Footer con acciones */}
+        {/* FOOTER con acciones */}
         {alertas.length > 0 && (
           <div style={{
-            padding: "10px 14px",
+            padding: "12px 14px",
             borderTop: `1px solid ${B.border}`,
             display: "flex",
             gap: 8,
             flexWrap: "wrap",
-            background: "rgba(0,0,0,0.02)"
+            background: "#fafafa"
           }}>
             {alertas.length > 1 && (
               <button
@@ -341,70 +388,79 @@ export default function NotificationDropdown({
                 disabled={markingAll}
                 style={{
                   flex: 1,
-                  padding: "8px 10px",
-                  fontSize: 10,
-                  fontWeight: 700,
-                  fontFamily: B.tM,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.06em",
-                  background: B.green,
+                  padding: "9px 12px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  fontFamily: B.font,
+                  background: B.ink,
                   color: "#fff",
-                  border: "none",
-                  borderRadius: 4,
-                  cursor: "pointer",
-                  opacity: markingAll ? 0.5 : 1
+                  border: "1px solid transparent",
+                  borderRadius: 999,
+                  cursor: markingAll ? "not-allowed" : "pointer",
+                  opacity: markingAll ? 0.5 : 1,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6
                 }}
               >
-                {markingAll ? "..." : "✓ Marcar todas"}
+                <CheckCheck size={13} strokeWidth={2.25} />
+                {markingAll ? "…" : "Marcar todas"}
               </button>
             )}
             <button
               onClick={handleGoToAlerts}
               style={{
                 flex: 1,
-                padding: "8px 10px",
-                fontSize: 10,
-                fontWeight: 700,
-                fontFamily: B.tM,
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
+                padding: "9px 12px",
+                fontSize: 12,
+                fontWeight: 600,
+                fontFamily: B.font,
                 background: "transparent",
-                color: B.text,
+                color: B.ink,
                 border: `1px solid ${B.border}`,
-                borderRadius: 4,
-                cursor: "pointer"
+                borderRadius: 999,
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6
               }}
             >
-              Ver todas →
+              Ver todas
+              <ArrowRight size={13} strokeWidth={2.25} />
             </button>
           </div>
         )}
 
-        {/* Footer vacío: solo ir a Alertas */}
+        {/* FOOTER vacío */}
         {alertas.length === 0 && (
           <div style={{
-            padding: "10px 14px",
+            padding: "12px 14px",
             borderTop: `1px solid ${B.border}`,
-            background: "rgba(0,0,0,0.02)"
+            background: "#fafafa"
           }}>
             <button
               onClick={handleGoToAlerts}
               style={{
                 width: "100%",
-                padding: "8px 10px",
-                fontSize: 10,
-                fontWeight: 700,
-                fontFamily: B.tM,
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
+                padding: "9px 12px",
+                fontSize: 12,
+                fontWeight: 600,
+                fontFamily: B.font,
                 background: "transparent",
-                color: B.muted,
+                color: B.ink,
                 border: `1px solid ${B.border}`,
-                borderRadius: 4,
-                cursor: "pointer"
+                borderRadius: 999,
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6
               }}
             >
-              Ir a Alertas
+              Ir a alertas
+              <ArrowRight size={13} strokeWidth={2.25} />
             </button>
           </div>
         )}
