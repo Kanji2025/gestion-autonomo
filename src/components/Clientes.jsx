@@ -1,24 +1,42 @@
 // src/components/Clientes.jsx
-// Gestión completa de clientes: nombre, CIF, email, estado comercial, estatus,
-// notas, facturas asociadas, y borrado seguro.
+// Gestión completa de clientes. REDISEÑO 2026 con paleta marca.
 
 import { useState } from "react";
+import {
+  Plus, Search, X, Edit3, Check, Trash2,
+  Lock, UserCheck, UserX, AlertCircle, Clock
+} from "lucide-react";
+
 import { B, fmt, hoy } from "../utils.js";
 import { useResponsive } from "../hooks/useResponsive.js";
 import { createRecord, updateRecord, deleteRecord } from "../api.js";
-import { Card, Lbl, Sem, SectionHeader, TxtArea, Inp } from "./UI.jsx";
+import {
+  Card, Lbl, StatusPill, TxtArea, Inp, PageHeader, Btn
+} from "./UI.jsx";
 
 // ============================================================
-// ESTADO COMERCIAL: colores y labels
+// ESTADOS COMERCIALES + helpers de color
 // ============================================================
 const ESTADOS_COMERCIAL = ["Al día", "Pendiente", "Moroso"];
-function colorEstado(estado) {
-  if (estado === "Al día") return B.green;
-  if (estado === "Pendiente") return B.amber;
-  if (estado === "Moroso") return B.red;
-  return B.muted;
+
+// Borde lateral según estado/actividad. Solo paleta marca.
+function colorBordeLateral(estado, activo, tieneVencidas) {
+  if (!activo) return B.border;
+  if (estado === "Moroso" || tieneVencidas) return B.ink;
+  if (estado === "Pendiente") return B.yellow;
+  return B.lavender; // Al día
 }
 
+// Estilo del chip de Estado cuando está activo (selección)
+function activoEstiloPill(estado) {
+  if (estado === "Moroso") return { bg: B.ink, fg: "#fff" };
+  if (estado === "Pendiente") return { bg: B.yellow, fg: B.ink };
+  return { bg: B.lavender, fg: B.ink };
+}
+
+// ============================================================
+// COMPONENTE PRINCIPAL
+// ============================================================
 export default function Clientes({ clientes, ingresos, onRefresh }) {
   const { isMobile, formColumns } = useResponsive();
 
@@ -29,25 +47,22 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
   const [newName, setNewName] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // Filtros
   const [showInactive, setShowInactive] = useState(false);
   const [search, setSearch] = useState("");
 
-  // Estado local para edición de cada campo (clientId -> valor temporal)
   const [nombresTmp, setNombresTmp] = useState({});
   const [nombreEditing, setNombreEditing] = useState(null);
   const [cifTmp, setCifTmp] = useState({});
   const [emailTmp, setEmailTmp] = useState({});
   const [notasTmp, setNotasTmp] = useState({});
 
-  // Indicadores "guardando"
-  const [fieldSaving, setFieldSaving] = useState(null); // "nombre-X", "cif-X", etc.
+  const [fieldSaving, setFieldSaving] = useState(null);
   const [estatusSaving, setEstatusSaving] = useState(null);
   const [estadoSaving, setEstadoSaving] = useState(null);
   const [deletingClient, setDeletingClient] = useState(null);
 
   // ============================================================
-  // ACCIONES
+  // ACCIONES (lógica intacta)
   // ============================================================
   const addCliente = async () => {
     if (!newName.trim()) return;
@@ -158,11 +173,10 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
 
   const borrarCliente = async (clienteId, nombre, tieneFacturas) => {
     if (tieneFacturas) {
-      alert(`No se puede borrar "${nombre}" porque tiene facturas asociadas. Borra primero las facturas o cambia el cliente a Inactivo.`);
+      alert(`No se puede borrar "${nombre}" porque tiene facturas asociadas. Borra primero las facturas o cámbialo a Inactivo.`);
       return;
     }
     if (!confirm(`¿Seguro que quieres borrar el cliente "${nombre}"? Esta acción no se puede deshacer.`)) return;
-
     setDeletingClient(clienteId);
     try {
       await deleteRecord("Clientes", clienteId);
@@ -175,7 +189,7 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
   };
 
   // ============================================================
-  // PROCESAR DATOS DE CLIENTES
+  // PROCESAR DATOS
   // ============================================================
   const cd = clientes
     .map(c => {
@@ -195,16 +209,10 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
       const p = fs.filter(f => f.fields["Estado"] === "Pendiente").length;
       const v = fs.filter(f => f.fields["Estado"] === "Vencida").length;
 
-      // Color del borde izquierdo: prioriza estado comercial si no está Al día
-      let bc;
-      if (!activo) bc = B.muted;
-      else if (estado === "Moroso") bc = B.red;
-      else if (estado === "Pendiente" || v > 0) bc = B.amber;
-      else bc = B.green;
+      const bc = colorBordeLateral(estado, activo, v > 0);
 
       return {
-        id: c.id,
-        nombre, estatus, activo, estado, cif, email, notas,
+        id: c.id, nombre, estatus, activo, estado, cif, email, notas,
         fs, totBase, totIrpf, benefNeto, p, v, bc
       };
     })
@@ -228,58 +236,91 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
   // RENDER
   // ============================================================
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <SectionHeader
-        title="Clientes"
+    <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+      <PageHeader
+        title="Clientes."
+        subtitle="Quiénes te pagan, qué te deben y cuánto facturan en total."
         action={
-          <button onClick={() => setShowAdd(!showAdd)} style={B.btn}>
-            {showAdd ? "CANCELAR" : "+ NUEVO CLIENTE"}
-          </button>
+          <Btn
+            onClick={() => setShowAdd(!showAdd)}
+            icon={showAdd ? X : Plus}
+            iconBefore
+            variant={showAdd ? "outline" : "primary"}
+          >
+            {showAdd ? "Cancelar" : "Nuevo cliente"}
+          </Btn>
         }
       />
 
-      {/* Barra de filtros */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-        <input
-          type="text"
-          placeholder="Buscar por nombre, CIF o email..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          style={{
-            ...B.inp,
-            maxWidth: isMobile ? "100%" : 320,
-            padding: "10px 14px",
-            fontSize: 13
-          }}
-        />
-        <button
+      {/* BARRA DE FILTROS */}
+      <div style={{
+        display: "flex",
+        gap: 10,
+        flexWrap: "wrap",
+        alignItems: "center"
+      }}>
+        <div style={{
+          position: "relative",
+          flex: isMobile ? "1 1 100%" : "0 0 320px",
+          maxWidth: "100%"
+        }}>
+          <Search
+            size={15}
+            strokeWidth={2}
+            style={{
+              position: "absolute",
+              left: 14,
+              top: "50%",
+              transform: "translateY(-50%)",
+              color: B.muted,
+              pointerEvents: "none"
+            }}
+          />
+          <input
+            type="text"
+            placeholder="Buscar por nombre, CIF o email…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{
+              ...B.inp,
+              padding: "10px 14px 10px 38px",
+              fontSize: 13
+            }}
+            onFocus={e => (e.target.style.borderColor = B.ink)}
+            onBlur={e => (e.target.style.borderColor = B.border)}
+          />
+        </div>
+
+        <Btn
+          variant={showInactive ? "primary" : "outline"}
+          size="sm"
           onClick={() => setShowInactive(!showInactive)}
-          style={{
-            ...B.btnSm,
-            background: showInactive ? B.text : "transparent",
-            color: showInactive ? "#fff" : B.muted,
-            border: `1px solid ${showInactive ? B.text : B.border}`
-          }}
+          icon={showInactive ? UserCheck : UserX}
+          iconBefore
         >
-          {showInactive ? "OCULTAR INACTIVOS" : `MOSTRAR INACTIVOS (${totalInactivos})`}
-        </button>
+          {showInactive
+            ? "Ocultar inactivos"
+            : `Mostrar inactivos${totalInactivos > 0 ? ` (${totalInactivos})` : ""}`}
+        </Btn>
+
         <span style={{
           fontSize: 12,
           color: B.muted,
-          fontFamily: B.tM,
-          marginLeft: "auto"
+          fontFamily: B.font,
+          marginLeft: "auto",
+          ...B.num
         }}>
           {totalActivos} activos · {totalInactivos} inactivos
         </span>
       </div>
 
-      {/* Formulario nuevo cliente */}
+      {/* FORM NUEVO CLIENTE */}
       {showAdd && (
-        <Card style={{ border: `2px solid ${B.purple}` }}>
-          <Lbl>Añadir Cliente</Lbl>
+        <Card style={{ border: `1px solid ${B.ink}` }}>
+          <Lbl>Añadir cliente</Lbl>
           <div style={{
             display: "flex",
-            gap: 12,
+            gap: 10,
             marginTop: 14,
             flexDirection: isMobile ? "column" : "row"
           }}>
@@ -289,44 +330,51 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
               placeholder="Nombre del cliente"
               style={{ ...B.inp, flex: 1 }}
               onKeyDown={e => e.key === "Enter" && addCliente()}
+              onFocus={e => (e.target.style.borderColor = B.ink)}
+              onBlur={e => (e.target.style.borderColor = B.border)}
+              autoFocus
             />
-            <button
+            <Btn
               onClick={addCliente}
-              disabled={saving}
-              style={{ ...B.btn, opacity: saving ? 0.5 : 1 }}
+              disabled={saving || !newName.trim()}
+              icon={Check}
+              iconBefore
             >
-              {saving ? "..." : "GUARDAR"}
-            </button>
+              {saving ? "Guardando…" : "Guardar"}
+            </Btn>
           </div>
-          <p style={{ fontSize: 12, color: B.muted, marginTop: 10, marginBottom: 0 }}>
-            Puedes añadir el CIF, email y más datos después al desplegar el cliente.
+          <p style={{
+            fontSize: 12,
+            color: B.muted,
+            marginTop: 10,
+            marginBottom: 0,
+            fontFamily: B.font
+          }}>
+            Puedes añadir CIF, email y más datos después al desplegar el cliente.
           </p>
         </Card>
       )}
 
-      {/* Lista vacía */}
+      {/* LISTA VACÍA */}
       {cd.length === 0 && (
         <Card>
-          <p style={{ color: B.muted, fontFamily: B.tS, margin: 0 }}>
+          <p style={{ color: B.muted, fontFamily: B.font, margin: 0, fontSize: 14 }}>
             {search || (!showInactive && totalInactivos > 0)
               ? "No hay clientes que coincidan con los filtros."
-              : "No hay clientes. Añádelos manualmente o se crean al subir facturas."}
+              : "No hay clientes todavía. Añádelos manualmente o se crean automáticamente al guardar facturas."}
           </p>
         </Card>
       )}
 
-      {/* Tarjetas de clientes */}
+      {/* TARJETAS DE CLIENTE */}
       {cd.map(c => {
         const isOpen = sel === c.id;
         const isEditingName = nombreEditing === c.id;
         const nombreValor = nombresTmp[c.id] !== undefined ? nombresTmp[c.id] : c.nombre;
-
         const cifValor = cifTmp[c.id] !== undefined ? cifTmp[c.id] : c.cif;
         const cifCambiado = cifTmp[c.id] !== undefined && cifTmp[c.id] !== c.cif;
-
         const emailValor = emailTmp[c.id] !== undefined ? emailTmp[c.id] : c.email;
         const emailCambiado = emailTmp[c.id] !== undefined && emailTmp[c.id] !== c.email;
-
         const notaValor = notasTmp[c.id] !== undefined ? notasTmp[c.id] : c.notas;
         const notaCambiada = notasTmp[c.id] !== undefined && notasTmp[c.id] !== c.notas;
 
@@ -334,12 +382,11 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
           <div
             key={c.id}
             style={{
-              background: B.card,
-              backdropFilter: "blur(14px)",
-              borderRadius: 10,
-              padding: 20,
+              background: B.surface,
+              borderRadius: 20,
               border: `1px solid ${B.border}`,
               borderLeft: `4px solid ${c.bc}`,
+              padding: "clamp(18px, 2.6vw, 24px)",
               opacity: c.activo ? 1 : 0.65,
               transition: "opacity 0.2s ease"
             }}
@@ -357,9 +404,11 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
               }}
             >
               <div style={{ flex: 1, minWidth: 0 }}>
-                {/* Nombre (editable cuando está desplegado) */}
                 {isEditingName ? (
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }} onClick={e => e.stopPropagation()}>
+                  <div
+                    style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
+                    onClick={e => e.stopPropagation()}
+                  >
                     <input
                       autoFocus
                       value={nombreValor}
@@ -372,38 +421,42 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
                         }
                       }}
                       style={{ ...B.inp, maxWidth: 280, fontSize: 15, fontWeight: 600 }}
+                      onFocus={e => (e.target.style.borderColor = B.ink)}
+                      onBlur={e => (e.target.style.borderColor = B.border)}
                     />
-                    <button
+                    <Btn
+                      size="sm"
                       onClick={() => guardarNombre(c.id)}
                       disabled={fieldSaving === `Nombre-${c.id}`}
-                      style={B.btnSm}
+                      icon={Check}
+                      iconBefore
                     >
-                      {fieldSaving === `Nombre-${c.id}` ? "..." : "GUARDAR"}
-                    </button>
-                    <button
+                      {fieldSaving === `Nombre-${c.id}` ? "Guardando…" : "Guardar"}
+                    </Btn>
+                    <Btn
+                      size="sm"
+                      variant="ghost"
                       onClick={() => {
                         setNombresTmp(prev => { const n = { ...prev }; delete n[c.id]; return n; });
                         setNombreEditing(null);
                       }}
-                      style={{
-                        ...B.btnSm,
-                        background: "transparent",
-                        color: B.muted,
-                        border: `1px solid ${B.border}`
-                      }}
+                      icon={X}
+                      iconBefore
                     >
-                      ✕
-                    </button>
+                      Cancelar
+                    </Btn>
                   </div>
                 ) : (
                   <div style={{
                     fontWeight: 600,
-                    fontSize: 15,
-                    fontFamily: B.tS,
+                    fontSize: 16,
+                    fontFamily: B.font,
                     display: "flex",
                     alignItems: "center",
                     gap: 8,
-                    flexWrap: "wrap"
+                    flexWrap: "wrap",
+                    color: B.ink,
+                    letterSpacing: "-0.01em"
                   }}>
                     {c.nombre}
                     {isOpen && (
@@ -414,158 +467,206 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
                           background: "transparent",
                           border: "none",
                           cursor: "pointer",
-                          padding: 2,
-                          fontSize: 13,
-                          opacity: 0.6
+                          padding: 4,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          color: B.muted
                         }}
                       >
-                        ✏️
+                        <Edit3 size={13} strokeWidth={2} />
                       </button>
                     )}
-                    {/* Badge Estatus */}
                     {!c.activo && (
                       <span style={{
-                        background: B.muted + "20",
+                        background: B.border,
                         color: B.muted,
-                        padding: "2px 8px",
-                        borderRadius: 4,
+                        padding: "2px 9px",
+                        borderRadius: 999,
                         fontSize: 10,
-                        fontWeight: 700,
-                        fontFamily: B.tM,
-                        textTransform: "uppercase"
+                        fontWeight: 600,
+                        fontFamily: B.font,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.06em"
                       }}>
                         Inactivo
                       </span>
                     )}
-                    {/* Badge Estado comercial (solo si no es "Al día") */}
                     {c.activo && c.estado !== "Al día" && (
                       <span style={{
-                        background: colorEstado(c.estado) + "18",
-                        color: colorEstado(c.estado),
-                        padding: "2px 8px",
-                        borderRadius: 4,
+                        background: activoEstiloPill(c.estado).bg,
+                        color: activoEstiloPill(c.estado).fg,
+                        padding: "2px 9px",
+                        borderRadius: 999,
                         fontSize: 10,
-                        fontWeight: 700,
-                        fontFamily: B.tM,
-                        textTransform: "uppercase"
+                        fontWeight: 600,
+                        fontFamily: B.font,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.06em"
                       }}>
                         {c.estado}
                       </span>
                     )}
                   </div>
                 )}
-                <div style={{ fontSize: 12, color: B.muted, marginTop: 4 }}>
+                <div style={{
+                  fontSize: 12,
+                  color: B.muted,
+                  marginTop: 4,
+                  fontFamily: B.font,
+                  ...B.num
+                }}>
                   {c.fs.length} factura{c.fs.length !== 1 ? "s" : ""}
                   {c.cif && <span> · {c.cif}</span>}
                 </div>
               </div>
+
               {!isEditingName && (
                 <div style={{ textAlign: "right" }}>
-                  <div style={{ fontWeight: 700, fontFamily: B.tM }}>{fmt(c.totBase)}</div>
-                  <div style={{ fontSize: 11, color: B.red, fontWeight: 600 }}>
-                    IRPF: {fmt(c.totIrpf)}
+                  <div style={{
+                    fontWeight: 700,
+                    fontFamily: B.font,
+                    fontSize: B.ty.numM,
+                    color: B.ink,
+                    letterSpacing: "-0.015em",
+                    ...B.num
+                  }}>
+                    {fmt(c.totBase)}
                   </div>
-                  <div style={{ fontSize: 11, color: B.green, fontWeight: 600 }}>
-                    Neto: {fmt(c.benefNeto)}
+                  <div style={{
+                    fontSize: 11,
+                    color: B.muted,
+                    fontWeight: 500,
+                    fontFamily: B.font,
+                    marginTop: 2,
+                    ...B.num
+                  }}>
+                    IRPF · {fmt(c.totIrpf)}
+                  </div>
+                  <div style={{
+                    fontSize: 11,
+                    color: B.ink,
+                    fontWeight: 600,
+                    fontFamily: B.font,
+                    marginTop: 1,
+                    ...B.num
+                  }}>
+                    Neto · {fmt(c.benefNeto)}
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Insignias rápidas de facturas */}
+            {/* CHIPS VENCIDAS/PENDIENTES */}
             {(c.v > 0 || c.p > 0) && !isEditingName && (
-              <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {c.v > 0 && (
                   <span style={{
-                    background: B.red + "12",
-                    color: B.red,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                    background: B.ink,
+                    color: "#fff",
                     padding: "4px 10px",
-                    borderRadius: 6,
-                    fontSize: 12,
-                    fontWeight: 600
+                    borderRadius: 999,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    fontFamily: B.font
                   }}>
+                    <AlertCircle size={11} strokeWidth={2.5} />
                     {c.v} vencida{c.v > 1 ? "s" : ""}
                   </span>
                 )}
                 {c.p > 0 && (
                   <span style={{
-                    background: B.amber + "12",
-                    color: B.amber,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                    background: B.yellow,
+                    color: B.ink,
                     padding: "4px 10px",
-                    borderRadius: 6,
-                    fontSize: 12,
-                    fontWeight: 600
+                    borderRadius: 999,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    fontFamily: B.font
                   }}>
+                    <Clock size={11} strokeWidth={2.5} />
                     {c.p} pendiente{c.p > 1 ? "s" : ""}
                   </span>
                 )}
               </div>
             )}
 
-            {/* Panel desplegable */}
+            {/* PANEL DESPLEGADO */}
             {isOpen && !isEditingName && (
-              <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 16 }}>
-                {/* Fila de Estatus (Activo/Inactivo) */}
-                <div style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  paddingBottom: 12,
-                  borderBottom: `1px solid ${B.border}`,
-                  flexWrap: "wrap"
-                }}>
+              <div style={{
+                marginTop: 20,
+                paddingTop: 20,
+                borderTop: `1px solid ${B.border}`,
+                display: "flex",
+                flexDirection: "column",
+                gap: 22
+              }}>
+                {/* Estatus */}
+                <div onClick={e => e.stopPropagation()}>
                   <Lbl>Estatus</Lbl>
-                  <button
-                    onClick={e => { e.stopPropagation(); toggleEstatus(c.id, c.estatus); }}
-                    disabled={estatusSaving === c.id}
-                    style={{
-                      ...B.btnSm,
-                      background: c.activo ? B.green : B.muted,
-                      opacity: estatusSaving === c.id ? 0.5 : 1,
-                      transition: "background 0.2s ease"
-                    }}
-                  >
-                    {estatusSaving === c.id
-                      ? "GUARDANDO..."
-                      : c.activo ? "ACTIVO · CAMBIAR A INACTIVO" : "INACTIVO · CAMBIAR A ACTIVO"}
-                  </button>
+                  <div style={{ marginTop: 8 }}>
+                    <Btn
+                      variant={c.activo ? "primary" : "outline"}
+                      size="sm"
+                      onClick={() => toggleEstatus(c.id, c.estatus)}
+                      disabled={estatusSaving === c.id}
+                      icon={c.activo ? UserCheck : UserX}
+                      iconBefore
+                    >
+                      {estatusSaving === c.id
+                        ? "Guardando…"
+                        : c.activo
+                          ? "Activo · cambiar a inactivo"
+                          : "Inactivo · cambiar a activo"}
+                    </Btn>
+                  </div>
                 </div>
 
-                {/* Fila de Estado comercial */}
-                <div style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  paddingBottom: 12,
-                  borderBottom: `1px solid ${B.border}`,
-                  flexWrap: "wrap"
-                }}>
+                {/* Estado comercial */}
+                <div onClick={e => e.stopPropagation()}>
                   <Lbl>Estado de pagos</Lbl>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }} onClick={e => e.stopPropagation()}>
+                  <div style={{
+                    marginTop: 8,
+                    display: "flex",
+                    gap: 6,
+                    flexWrap: "wrap"
+                  }}>
                     {ESTADOS_COMERCIAL.map(opt => {
                       const isActive = c.estado === opt;
-                      const col = colorEstado(opt);
+                      const style = isActive ? activoEstiloPill(opt) : null;
                       return (
                         <button
                           key={opt}
                           onClick={() => cambiarEstado(c.id, opt)}
                           disabled={estadoSaving === c.id}
                           style={{
-                            ...B.btnSm,
-                            background: isActive ? col : "transparent",
-                            color: isActive ? "#fff" : col,
-                            border: `1px solid ${col}`,
-                            opacity: estadoSaving === c.id ? 0.5 : 1
+                            padding: "8px 14px",
+                            borderRadius: 999,
+                            border: `1px solid ${isActive ? B.ink : B.border}`,
+                            background: isActive ? style.bg : "transparent",
+                            color: isActive ? style.fg : B.muted,
+                            fontFamily: B.font,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: estadoSaving === c.id ? "not-allowed" : "pointer",
+                            opacity: estadoSaving === c.id ? 0.5 : 1,
+                            transition: "all 0.15s ease",
+                            letterSpacing: "0.005em"
                           }}
                         >
-                          {opt.toUpperCase()}
+                          {opt}
                         </button>
                       );
                     })}
                   </div>
                 </div>
 
-                {/* Campos CIF y Email en grid responsive */}
+                {/* CIF y Email */}
                 <div
                   onClick={e => e.stopPropagation()}
                   style={{
@@ -582,25 +683,23 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
                       ph="B12345678"
                     />
                     {cifCambiado && (
-                      <div style={{ marginTop: 6, display: "flex", gap: 6 }}>
-                        <button
+                      <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
+                        <Btn
+                          size="sm"
                           onClick={() => guardarCif(c.id)}
                           disabled={fieldSaving === `CIF/NIF-${c.id}`}
-                          style={{ ...B.btnSm, opacity: fieldSaving === `CIF/NIF-${c.id}` ? 0.5 : 1 }}
+                          icon={Check}
+                          iconBefore
                         >
-                          {fieldSaving === `CIF/NIF-${c.id}` ? "..." : "GUARDAR"}
-                        </button>
-                        <button
+                          {fieldSaving === `CIF/NIF-${c.id}` ? "…" : "Guardar"}
+                        </Btn>
+                        <Btn
+                          size="sm"
+                          variant="ghost"
                           onClick={() => setCifTmp(prev => { const n = { ...prev }; delete n[c.id]; return n; })}
-                          style={{
-                            ...B.btnSm,
-                            background: "transparent",
-                            color: B.muted,
-                            border: `1px solid ${B.border}`
-                          }}
                         >
-                          DESCARTAR
-                        </button>
+                          Descartar
+                        </Btn>
                       </div>
                     )}
                   </div>
@@ -614,25 +713,23 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
                       ph="contacto@empresa.com"
                     />
                     {emailCambiado && (
-                      <div style={{ marginTop: 6, display: "flex", gap: 6 }}>
-                        <button
+                      <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
+                        <Btn
+                          size="sm"
                           onClick={() => guardarEmail(c.id)}
                           disabled={fieldSaving === `Email-${c.id}`}
-                          style={{ ...B.btnSm, opacity: fieldSaving === `Email-${c.id}` ? 0.5 : 1 }}
+                          icon={Check}
+                          iconBefore
                         >
-                          {fieldSaving === `Email-${c.id}` ? "..." : "GUARDAR"}
-                        </button>
-                        <button
+                          {fieldSaving === `Email-${c.id}` ? "…" : "Guardar"}
+                        </Btn>
+                        <Btn
+                          size="sm"
+                          variant="ghost"
                           onClick={() => setEmailTmp(prev => { const n = { ...prev }; delete n[c.id]; return n; })}
-                          style={{
-                            ...B.btnSm,
-                            background: "transparent",
-                            color: B.muted,
-                            border: `1px solid ${B.border}`
-                          }}
                         >
-                          DESCARTAR
-                        </button>
+                          Descartar
+                        </Btn>
                       </div>
                     )}
                   </div>
@@ -644,39 +741,38 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
                     label="Notas internas"
                     value={notaValor}
                     onChange={txt => setNotasTmp(prev => ({ ...prev, [c.id]: txt }))}
-                    ph="Apuntes sobre este cliente: condiciones especiales, contactos, recordatorios..."
+                    ph="Apuntes sobre este cliente: condiciones especiales, contactos, recordatorios…"
                     rows={3}
                   />
                   {notaCambiada && (
-                    <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-                      <button
+                    <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
+                      <Btn
+                        size="sm"
                         onClick={() => guardarNota(c.id)}
                         disabled={fieldSaving === `Notas-${c.id}`}
-                        style={{ ...B.btnSm, opacity: fieldSaving === `Notas-${c.id}` ? 0.5 : 1 }}
+                        icon={Check}
+                        iconBefore
                       >
-                        {fieldSaving === `Notas-${c.id}` ? "GUARDANDO..." : "GUARDAR NOTA"}
-                      </button>
-                      <button
+                        {fieldSaving === `Notas-${c.id}` ? "Guardando…" : "Guardar nota"}
+                      </Btn>
+                      <Btn
+                        size="sm"
+                        variant="ghost"
                         onClick={() => setNotasTmp(prev => { const n = { ...prev }; delete n[c.id]; return n; })}
-                        style={{
-                          ...B.btnSm,
-                          background: "transparent",
-                          color: B.muted,
-                          border: `1px solid ${B.border}`
-                        }}
                       >
-                        DESCARTAR
-                      </button>
+                        Descartar
+                      </Btn>
                     </div>
                   )}
                 </div>
 
-                {/* Facturas del cliente */}
+                {/* Facturas */}
                 {c.fs.length > 0 && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     <Lbl>Facturas</Lbl>
                     {c.fs.map(f => {
                       const irpfF = f.fields["IRPF (€)"] || 0;
+                      const estadoFactura = f.fields["Estado"] || "Pendiente";
                       return (
                         <div
                           key={f.id}
@@ -684,55 +780,96 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
                             display: "flex",
                             justifyContent: "space-between",
                             alignItems: "center",
-                            background: "rgba(0,0,0,0.03)",
+                            background: "#fafafa",
                             padding: "12px 14px",
-                            borderRadius: 8,
+                            borderRadius: 12,
                             fontSize: 13,
-                            gap: 8,
-                            flexWrap: "wrap"
+                            gap: 10,
+                            flexWrap: "wrap",
+                            fontFamily: B.font,
+                            border: `1px solid ${B.border}`
                           }}
                         >
-                          <span style={{ fontWeight: 700, fontFamily: B.tM, fontSize: 12, minWidth: 90 }}>
-                            {f.fields["Nº Factura"] || "-"}
+                          <span style={{
+                            fontWeight: 600,
+                            fontSize: 12,
+                            minWidth: 90,
+                            color: B.ink,
+                            ...B.num
+                          }}>
+                            {f.fields["Nº Factura"] || "—"}
                           </span>
-                          <span style={{ color: B.muted, minWidth: 80 }}>
-                            {f.fields["Fecha"] || "-"}
+                          <span style={{
+                            color: B.muted,
+                            minWidth: 80,
+                            fontSize: 12,
+                            ...B.num
+                          }}>
+                            {f.fields["Fecha"] || "—"}
                           </span>
-                          <span style={{ fontWeight: 600, minWidth: 70 }}>
+                          <span style={{
+                            fontWeight: 600,
+                            minWidth: 70,
+                            color: B.ink,
+                            ...B.num
+                          }}>
                             {fmt(f.fields["Base Imponible"])}
                           </span>
-                          <span style={{ color: B.red, fontSize: 11, fontWeight: 600, minWidth: 60 }}>
-                            IRPF {fmt(irpfF)}
+                          <span style={{
+                            color: B.muted,
+                            fontSize: 11,
+                            fontWeight: 500,
+                            minWidth: 70,
+                            ...B.num
+                          }}>
+                            IRPF · {fmt(irpfF)}
                           </span>
-                          <Sem estado={f.fields["Estado"] || "Pendiente"} />
+
+                          <StatusPill estado={estadoFactura} />
+
                           <select
-                            value={f.fields["Estado"] || "Pendiente"}
+                            value={estadoFactura}
                             onClick={e => e.stopPropagation()}
                             onChange={e => { e.stopPropagation(); cambiarEstadoFactura(f.id, e.target.value); }}
                             disabled={updId === f.id}
                             style={{
-                              padding: "4px 8px",
-                              borderRadius: 4,
+                              padding: "5px 10px",
+                              borderRadius: 999,
                               border: `1px solid ${B.border}`,
                               fontSize: 11,
-                              fontFamily: B.tM,
-                              cursor: "pointer",
-                              background: updId === f.id ? "#eee" : "#fff"
+                              fontFamily: B.font,
+                              fontWeight: 600,
+                              cursor: updId === f.id ? "not-allowed" : "pointer",
+                              background: updId === f.id ? "#f0f0f0" : "#fff",
+                              color: B.ink
                             }}
                           >
                             <option value="Pendiente">Pendiente</option>
                             <option value="Cobrada">Cobrada</option>
                             <option value="Vencida">Vencida</option>
                           </select>
+
                           <button
                             onClick={e => {
                               e.stopPropagation();
                               if (confirm("¿Borrar esta factura?")) delFactura(f.id);
                             }}
                             disabled={del === f.id}
-                            style={{ ...B.btnDel, opacity: del === f.id ? 0.5 : 1 }}
+                            title="Borrar factura"
+                            style={{
+                              background: "transparent",
+                              border: `1px solid ${B.border}`,
+                              borderRadius: 999,
+                              padding: 6,
+                              cursor: del === f.id ? "not-allowed" : "pointer",
+                              opacity: del === f.id ? 0.5 : 1,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              color: B.muted
+                            }}
                           >
-                            ✕
+                            <Trash2 size={13} strokeWidth={2} />
                           </button>
                         </div>
                       );
@@ -740,43 +877,41 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
                   </div>
                 )}
 
-                {/* ZONA DE PELIGRO: borrar cliente */}
+                {/* Zona de peligro */}
                 <div style={{
-                  marginTop: 8,
-                  paddingTop: 16,
+                  marginTop: 4,
+                  paddingTop: 18,
                   borderTop: `1px dashed ${B.border}`
                 }}>
-                  <div style={{
-                    fontSize: 10,
-                    fontFamily: B.tM,
-                    color: B.muted,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    marginBottom: 10
-                  }}>
-                    Zona de peligro
+                  <Lbl>Zona de peligro</Lbl>
+                  <div style={{ marginTop: 8 }}>
+                    {c.fs.length > 0 ? (
+                      <Btn
+                        variant="outline"
+                        size="sm"
+                        icon={Lock}
+                        iconBefore
+                        disabled
+                        style={{ cursor: "not-allowed" }}
+                      >
+                        No se puede borrar ({c.fs.length} factura{c.fs.length > 1 ? "s" : ""})
+                      </Btn>
+                    ) : (
+                      <Btn
+                        variant="danger"
+                        size="sm"
+                        icon={Trash2}
+                        iconBefore
+                        onClick={e => {
+                          e.stopPropagation();
+                          borrarCliente(c.id, c.nombre, false);
+                        }}
+                        disabled={deletingClient === c.id}
+                      >
+                        {deletingClient === c.id ? "Borrando…" : "Borrar cliente"}
+                      </Btn>
+                    )}
                   </div>
-                  <button
-                    onClick={e => {
-                      e.stopPropagation();
-                      borrarCliente(c.id, c.nombre, c.fs.length > 0);
-                    }}
-                    disabled={deletingClient === c.id}
-                    style={{
-                      ...B.btnDel,
-                      padding: "8px 16px",
-                      fontSize: 11,
-                      opacity: deletingClient === c.id ? 0.5 : (c.fs.length > 0 ? 0.6 : 1),
-                      cursor: c.fs.length > 0 ? "not-allowed" : "pointer"
-                    }}
-                    title={c.fs.length > 0 ? "Borra primero las facturas asociadas" : "Borrar cliente"}
-                  >
-                    {deletingClient === c.id
-                      ? "BORRANDO..."
-                      : c.fs.length > 0
-                        ? `🔒 NO SE PUEDE BORRAR (${c.fs.length} factura${c.fs.length > 1 ? "s" : ""})`
-                        : "🗑 BORRAR CLIENTE"}
-                  </button>
                 </div>
               </div>
             )}
