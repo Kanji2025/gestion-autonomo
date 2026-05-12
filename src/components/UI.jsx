@@ -169,10 +169,12 @@ export function Sem({ estado }) {
 }
 
 export function StatusPill({ estado }) {
+  // PALETA MARCA 2026: negro/amarillo/lavanda. Sin verde/rojo/ámbar.
+  // Vencida destaca por contraste inverso (negro sobre blanco/lavanda).
   const map = {
-    Cobrada: { c: B.green, bg: B.greenSoft, l: "Cobrada", icon: CheckCircle2 },
-    Pendiente: { c: B.amber, bg: B.amberSoft, l: "Pendiente", icon: Clock },
-    Vencida: { c: B.red, bg: B.redSoft, l: "Vencida", icon: AlertCircle }
+    Cobrada: { bg: B.lavender, fg: B.ink, l: "Cobrada", icon: CheckCircle2 },
+    Pendiente: { bg: B.yellow, fg: B.ink, l: "Pendiente", icon: Clock },
+    Vencida: { bg: B.ink, fg: "#fff", l: "Vencida", icon: AlertCircle }
   };
   const x = map[estado] || map.Pendiente;
   const Icon = x.icon;
@@ -182,7 +184,7 @@ export function StatusPill({ estado }) {
       alignItems: "center",
       gap: 5,
       background: x.bg,
-      color: x.c,
+      color: x.fg,
       padding: "4px 10px",
       borderRadius: 999,
       fontSize: 11,
@@ -195,7 +197,6 @@ export function StatusPill({ estado }) {
     </span>
   );
 }
-
 // ============================================================
 // BARRA DE PROGRESO
 // ============================================================
