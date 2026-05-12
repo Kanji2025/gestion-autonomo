@@ -1,21 +1,34 @@
 // src/components/GastosFijos.jsx
-// Vista de Gastos Fijos: listado con activos primero, baja al final.
-// Muestra importe medio, total acumulado y nº de pagos por cada uno.
-// Permite editar datos, dar de baja y borrar permanentemente.
-// "Aparta cada mes" con separación fiscal (deducible/cuota SS/no deducible).
+// Vista de Gastos Fijos. REDISEÑO 2026 paleta marca completa.
+// LÓGICA INTACTA: prorrateo fiscal (Deducible/Cuota SS/No deducible), baja/reactivar, edición.
 
 import { useState } from "react";
+import {
+  Repeat, Calendar, CheckCircle2, Building2, AlertCircle,
+  Wallet, Receipt, Clock, StickyNote, Edit3, Pause, Play,
+  Trash2, ChevronDown, ChevronRight, X, Check
+} from "lucide-react";
+
 import { B, fmt, hoy } from "../utils.js";
 import { useResponsive } from "../hooks/useResponsive.js";
 import { updateRecord, deleteRecord } from "../api.js";
-import { Card, Lbl, Inp, Sel, SectionHeader, ErrorBox } from "./UI.jsx";
+import {
+  Card, Lbl, Inp, Sel, TxtArea, PageHeader, Btn, IconPill, ErrorBox
+} from "./UI.jsx";
 
 const PERIODICIDADES = ["Mensual", "Trimestral", "Anual"];
 const MONEDAS = ["EUR", "USD", "GBP"];
 const TIPOS = ["Deducible", "Cuota SS", "No deducible"];
 
+// Icono según tipo fiscal
+function iconForTipo(tipo) {
+  if (tipo === "Cuota SS") return Building2;
+  if (tipo === "No deducible") return AlertCircle;
+  return CheckCircle2;
+}
+
 // ============================================================
-// CALCULADORA DE PRORRATEO POR TIPO
+// CALCULADORA DE PRORRATEO POR TIPO (LÓGICA INTACTA)
 // ============================================================
 function calcularProrrateoMensual(gastosFijos) {
   let deducible = 0;
@@ -41,6 +54,34 @@ function calcularProrrateoMensual(gastosFijos) {
   return { deducible, cuotaSS, noDeducible, total: deducible + cuotaSS + noDeducible };
 }
 
+// ============================================================
+// CHIP DE STAT (estilo coherente)
+// ============================================================
+function StatChip({ icon: Icon, children }) {
+  return (
+    <div style={{
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 5,
+      padding: "4px 10px",
+      background: "#fff",
+      border: `1px solid ${B.border}`,
+      borderRadius: 999,
+      fontSize: 11,
+      fontWeight: 500,
+      fontFamily: B.font,
+      color: B.ink,
+      ...B.num
+    }}>
+      <Icon size={11} strokeWidth={2} />
+      {children}
+    </div>
+  );
+}
+
+// ============================================================
+// COMPONENTE PRINCIPAL
+// ============================================================
 export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
   const { isMobile, formColumns } = useResponsive();
   const [editId, setEditId] = useState(null);
@@ -50,7 +91,7 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
   const [showInactivos, setShowInactivos] = useState(false);
   const [err, setErr] = useState("");
 
-  // Calcular estadísticas por gasto fijo
+  // Enriquecer con estadísticas
   const enriquecer = (gf) => {
     const gastosLink = gf.fields["Gastos"] || [];
     const gastosVinculados = gastos.filter(g => gastosLink.includes(g.id));
@@ -74,7 +115,6 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
   const activos = enriquecidos.filter(g => g.fields["Activa"] === "Sí" || !g.fields["Activa"]);
   const inactivos = enriquecidos.filter(g => g.fields["Activa"] === "No");
 
-  // CÁLCULO con separación fiscal
   const prorrateo = calcularProrrateoMensual(gastosFijos);
 
   // ============================================================
@@ -134,7 +174,7 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
   };
 
   // ============================================================
-  // DAR DE BAJA / REACTIVAR
+  // BAJA / REACTIVAR
   // ============================================================
   const confirmarBaja = async () => {
     const { id, accion } = bajaModal;
@@ -181,6 +221,8 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
     const fechaAlta = gf.fields["Fecha Alta"];
     const fechaBaja = gf.fields["Fecha Baja"];
     const notas = gf.fields["Notas"];
+    const tipo = gf.fields["Tipo"] || "Deducible";
+    const TipoIcon = iconForTipo(tipo);
 
     const importeMensual =
       periodicidad === "Mensual" ? importeMedio :
@@ -188,14 +230,18 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
       periodicidad === "Anual" ? importeMedio / 12 : 0;
 
     return (
-      <div key={gf.id} style={{
-        padding: 16,
-        background: esActivo ? "rgba(0,0,0,0.03)" : "rgba(220,38,38,0.04)",
-        border: esActivo ? `1px solid ${B.border}` : `1px solid ${B.red}30`,
-        borderRadius: 10,
-        marginBottom: 10,
-        opacity: esActivo ? 1 : 0.78
-      }}>
+      <div
+        key={gf.id}
+        style={{
+          padding: 16,
+          background: "#fafafa",
+          border: `1px solid ${B.border}`,
+          borderRadius: 14,
+          marginBottom: 10,
+          opacity: esActivo ? 1 : 0.65,
+          transition: "opacity 0.2s ease"
+        }}
+      >
         <div style={{
           display: "flex",
           justifyContent: "space-between",
@@ -204,128 +250,210 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
           flexWrap: "wrap"
         }}>
           <div style={{ flex: 1, minWidth: 200 }}>
+            {/* Header con icono y nombre */}
             <div style={{
               fontWeight: 700,
               fontSize: 15,
-              fontFamily: B.tS,
+              fontFamily: B.font,
               display: "flex",
               alignItems: "center",
               gap: 8,
-              flexWrap: "wrap"
+              flexWrap: "wrap",
+              color: B.ink,
+              letterSpacing: "-0.01em"
             }}>
-              <span style={{ fontSize: 16 }}>🔄</span>
+              <Repeat size={15} strokeWidth={2} />
               {gf.fields["Nombre"] || gf.fields["Proveedor"] || "Sin nombre"}
               {!esActivo && (
                 <span style={{
-                  background: B.red + "15",
-                  color: B.red,
-                  padding: "2px 8px",
-                  borderRadius: 4,
+                  background: B.ink,
+                  color: "#fff",
+                  padding: "2px 9px",
+                  borderRadius: 999,
                   fontSize: 10,
-                  fontWeight: 700,
-                  fontFamily: B.tM,
-                  textTransform: "uppercase"
+                  fontWeight: 600,
+                  fontFamily: B.font,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em"
                 }}>
                   Dado de baja
                 </span>
               )}
             </div>
 
-            <div style={{ fontSize: 12, color: B.ink, marginTop: 4, fontFamily: B.tS }}>
-              <span style={{ fontWeight: 600 }}>{gf.fields["Proveedor"] || "—"}</span>
-              {gf.fields["CIF Proveedor"] && <span> · CIF: {gf.fields["CIF Proveedor"]}</span>}
-            </div>
-
-            <div style={{ fontSize: 11, color: B.ink, marginTop: 6, fontFamily: B.tM }}>
-              📅 {periodicidad}
-              {fechaAlta && <span> · Alta: {fechaAlta}</span>}
-              {fechaBaja && <span> · Baja: {fechaBaja}</span>}
-            </div>
-
+            {/* Proveedor + CIF */}
             <div style={{
-              marginTop: 10,
+              fontSize: 13,
+              color: B.ink,
+              marginTop: 6,
+              fontFamily: B.font,
+              fontWeight: 500
+            }}>
+              {gf.fields["Proveedor"] || "—"}
+              {gf.fields["CIF Proveedor"] && (
+                <span style={{ ...B.num }}> · CIF {gf.fields["CIF Proveedor"]}</span>
+              )}
+            </div>
+
+            {/* Periodicidad + fechas */}
+            <div style={{
+              fontSize: 11,
+              color: B.ink,
+              marginTop: 4,
+              fontFamily: B.font,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              flexWrap: "wrap"
+            }}>
+              <Calendar size={11} strokeWidth={2} />
+              <span>{periodicidad}</span>
+              {fechaAlta && <span style={B.num}> · Alta {fechaAlta}</span>}
+              {fechaBaja && <span style={B.num}> · Baja {fechaBaja}</span>}
+            </div>
+
+            {/* Chips stats */}
+            <div style={{
+              marginTop: 12,
               display: "flex",
               gap: 6,
               flexWrap: "wrap"
             }}>
-              {(() => {
-                const tipo = gf.fields["Tipo"] || "Deducible";
-                const tipoColor = tipo === "Deducible" ? B.green : tipo === "Cuota SS" ? "#3b82f6" : B.red;
-                const tipoIcon = tipo === "Deducible" ? "🟢" : tipo === "Cuota SS" ? "🔵" : "🔴";
-                return (
-                  <div style={chipStyle(tipoColor)}>
-                    {tipoIcon} <strong>{tipo}</strong>
-                  </div>
-                );
-              })()}
-              <div style={chipStyle(B.purple)}>
-                💰 Importe medio: <strong>{fmt(stats.importeMedio)}</strong>
-              </div>
-              <div style={chipStyle(B.green)}>
-                📊 Total pagado: <strong>{fmt(stats.totalPagado)}</strong>
-              </div>
-              <div style={chipStyle(B.text)}>
-                🧾 {stats.numPagos} {stats.numPagos === 1 ? "pago" : "pagos"}
-              </div>
+              <StatChip icon={TipoIcon}>{tipo}</StatChip>
+              <StatChip icon={Wallet}>Medio · {fmt(stats.importeMedio)}</StatChip>
+              <StatChip icon={Receipt}>Total · {fmt(stats.totalPagado)}</StatChip>
+              <StatChip icon={Receipt}>{stats.numPagos} {stats.numPagos === 1 ? "pago" : "pagos"}</StatChip>
               {stats.ultimaFecha && (
-                <div style={chipStyle(B.muted)}>
-                  ⏰ Último: {stats.ultimaFecha}
-                </div>
+                <StatChip icon={Clock}>Último · {stats.ultimaFecha}</StatChip>
               )}
             </div>
 
+            {/* Notas */}
             {notas && (
               <div style={{
-                marginTop: 8,
-                padding: "6px 10px",
-                background: B.yellow + "33",
-                borderRadius: 6,
+                marginTop: 10,
+                padding: "10px 12px",
+                background: B.yellow,
+                borderRadius: 12,
                 fontSize: 12,
-                color: B.text,
-                fontFamily: B.tS,
-                fontStyle: "italic"
+                color: B.ink,
+                fontFamily: B.font,
+                lineHeight: 1.5,
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 8
               }}>
-                📝 {notas}
+                <StickyNote size={13} strokeWidth={2} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>{notas}</span>
               </div>
             )}
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-            <div style={{ fontWeight: 700, fontFamily: B.tM, fontSize: 16, color: B.text }}>
-              {fmt(importeMedio)} {moneda !== "EUR" && <span style={{ fontSize: 11, color: B.muted }}>{moneda}</span>}
+          {/* Columna derecha: importe + acciones */}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+            <div style={{
+              fontWeight: 700,
+              fontFamily: B.font,
+              fontSize: B.ty.numM,
+              color: B.ink,
+              letterSpacing: "-0.015em",
+              ...B.num
+            }}>
+              {fmt(importeMedio)}
+              {moneda !== "EUR" && (
+                <span style={{ fontSize: 11, color: B.muted, marginLeft: 4 }}>{moneda}</span>
+              )}
             </div>
             {esActivo && periodicidad !== "Mensual" && (
-              <div style={{ fontSize: 11, color: B.amber, fontWeight: 600 }}>
+              <div style={{
+                fontSize: 11,
+                color: B.muted,
+                fontWeight: 500,
+                fontFamily: B.font,
+                ...B.num
+              }}>
                 ≈ {fmt(importeMensual)}/mes
               </div>
             )}
-            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-              <button onClick={() => startEdit(gf)} style={iconBtnStyle(B.text)} title="Editar">
-                ✏️
+            <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+              <button
+                onClick={() => startEdit(gf)}
+                title="Editar"
+                style={{
+                  background: "transparent",
+                  border: `1px solid ${B.border}`,
+                  borderRadius: 999,
+                  padding: 6,
+                  cursor: "pointer",
+                  color: B.ink,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center"
+                }}
+              >
+                <Edit3 size={13} strokeWidth={2} />
               </button>
               {esActivo ? (
                 <button
-                  onClick={() => setBajaModal({ id: gf.id, nombre: gf.fields["Nombre"] || gf.fields["Proveedor"], accion: "baja" })}
-                  style={iconBtnStyle(B.amber)}
+                  onClick={() => setBajaModal({
+                    id: gf.id,
+                    nombre: gf.fields["Nombre"] || gf.fields["Proveedor"],
+                    accion: "baja"
+                  })}
                   title="Dar de baja"
+                  style={{
+                    background: "transparent",
+                    border: `1px solid ${B.border}`,
+                    borderRadius: 999,
+                    padding: 6,
+                    cursor: "pointer",
+                    color: B.ink,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center"
+                  }}
                 >
-                  ⏸
+                  <Pause size={13} strokeWidth={2} />
                 </button>
               ) : (
                 <button
-                  onClick={() => setBajaModal({ id: gf.id, nombre: gf.fields["Nombre"] || gf.fields["Proveedor"], accion: "reactivar" })}
-                  style={iconBtnStyle(B.green)}
+                  onClick={() => setBajaModal({
+                    id: gf.id,
+                    nombre: gf.fields["Nombre"] || gf.fields["Proveedor"],
+                    accion: "reactivar"
+                  })}
                   title="Reactivar"
+                  style={{
+                    background: "transparent",
+                    border: `1px solid ${B.border}`,
+                    borderRadius: 999,
+                    padding: 6,
+                    cursor: "pointer",
+                    color: B.ink,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center"
+                  }}
                 >
-                  ▶
+                  <Play size={13} strokeWidth={2} />
                 </button>
               )}
               <button
                 onClick={() => borrarPermanentemente(gf)}
-                style={iconBtnStyle(B.red)}
                 title="Borrar permanentemente"
+                style={{
+                  background: "transparent",
+                  border: `1px solid ${B.border}`,
+                  borderRadius: 999,
+                  padding: 6,
+                  cursor: "pointer",
+                  color: B.muted,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center"
+                }}
               >
-                🗑
+                <Trash2 size={13} strokeWidth={2} />
               </button>
             </div>
           </div>
@@ -334,84 +462,76 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
     );
   };
 
+  // ============================================================
+  // EDITOR
+  // ============================================================
   const renderEditor = () => {
     if (!editForm) return null;
     return (
-      <Card style={{ border: `2px solid ${B.purple}` }}>
-        <Lbl><span style={{ color: B.purple }}>EDITAR GASTO FIJO</span></Lbl>
-        <ErrorBox>{err}</ErrorBox>
+      <Card style={{ border: `1px solid ${B.ink}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+          <IconPill icon={Edit3} size={28} />
+          <Lbl>Editar gasto fijo</Lbl>
+        </div>
+        {err && <div style={{ marginBottom: 14 }}><ErrorBox>{err}</ErrorBox></div>}
         <div style={{
           display: "grid",
           gridTemplateColumns: `repeat(${formColumns}, 1fr)`,
-          gap: 14,
-          marginTop: 14
+          gap: 14
         }}>
           <Inp label="Nombre" value={editForm.nombre} onChange={v => updateField("nombre", v)} ph="Ej: Canva Pro" />
           <Inp label="Proveedor" value={editForm.proveedor} onChange={v => updateField("proveedor", v)} ph="Ej: Canva" />
-          <Inp label="CIF Proveedor" value={editForm.cifProveedor} onChange={v => updateField("cifProveedor", v)} ph="Opcional" />
-          <Inp label="Importe Medio" value={editForm.importe} onChange={v => updateField("importe", v)} type="number" />
+          <Inp label="CIF proveedor" value={editForm.cifProveedor} onChange={v => updateField("cifProveedor", v)} ph="Opcional" />
+          <Inp label="Importe medio" value={editForm.importe} onChange={v => updateField("importe", v)} type="number" />
           <Sel label="Periodicidad" value={editForm.periodicidad} onChange={v => updateField("periodicidad", v)} options={PERIODICIDADES} />
           <Sel label="Moneda" value={editForm.moneda} onChange={v => updateField("moneda", v)} options={MONEDAS} />
-          <Sel label="Tipo Fiscal" value={editForm.tipo} onChange={v => updateField("tipo", v)} options={TIPOS} />
+          <Sel label="Tipo fiscal" value={editForm.tipo} onChange={v => updateField("tipo", v)} options={TIPOS} />
         </div>
         <div style={{ marginTop: 14 }}>
-          <label style={{
-            fontSize: 11, fontWeight: 700, fontFamily: B.tM,
-            textTransform: "uppercase", letterSpacing: "0.08em",
-            color: B.ink, display: "block", marginBottom: 6
-          }}>NOTAS</label>
-          <textarea
+          <TxtArea
+            label="Notas"
             value={editForm.notas}
-            onChange={e => updateField("notas", e.target.value)}
-            placeholder="Cualquier detalle útil sobre este gasto fijo..."
-            style={{
-              width: "100%", padding: "12px 14px", borderRadius: 6,
-              border: "2px solid rgba(0,0,0,0.1)", background: "#fff", color: "#111",
-              fontSize: 14, fontFamily: B.tS, outline: "none",
-              boxSizing: "border-box", minHeight: 70, resize: "vertical"
-            }}
+            onChange={v => updateField("notas", v)}
+            ph="Cualquier detalle útil sobre este gasto fijo…"
+            rows={3}
           />
         </div>
-        <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-          <button onClick={saveEdit} disabled={savingEdit} style={{ ...B.btn, flex: 1, opacity: savingEdit ? 0.5 : 1 }}>
-            {savingEdit ? "GUARDANDO..." : "GUARDAR CAMBIOS"}
-          </button>
-          <button onClick={cancelEdit} style={{
-            ...B.btn,
-            flex: 1,
-            background: "transparent",
-            color: B.text,
-            border: `2px solid ${B.text}`
-          }}>
-            CANCELAR
-          </button>
+        <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
+          <Btn
+            onClick={saveEdit}
+            disabled={savingEdit}
+            icon={Check}
+            iconBefore
+          >
+            {savingEdit ? "Guardando…" : "Guardar cambios"}
+          </Btn>
+          <Btn
+            onClick={cancelEdit}
+            variant="outline"
+            icon={X}
+            iconBefore
+          >
+            Cancelar
+          </Btn>
         </div>
       </Card>
     );
   };
 
+  // ============================================================
+  // RENDER PRINCIPAL
+  // ============================================================
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-      <SectionHeader title="Gastos Fijos" />
+      <PageHeader
+        title="Gastos fijos."
+        subtitle="Tus suscripciones y gastos recurrentes prorrateados a mensual."
+      />
 
-      {editId && (
-        <div>
-          <div style={{
-            fontSize: 11,
-            color: B.purple,
-            fontFamily: B.tM,
-            fontWeight: 700,
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
-            marginBottom: 6
-          }}>
-            ✏️ Editando gasto fijo
-          </div>
-          {renderEditor()}
-        </div>
-      )}
+      {/* EDITOR */}
+      {editId && renderEditor()}
 
-      {/* APARTA CADA MES — solo colores de marca */}
+      {/* APARTA CADA MES — card amarilla intacta */}
       <div style={{
         background: B.yellow,
         borderRadius: 20,
@@ -500,6 +620,7 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
         </div>
       </div>
 
+      {/* ACTIVOS */}
       {activos.length > 0 ? (
         <Card>
           <Lbl>Activos ({activos.length})</Lbl>
@@ -509,28 +630,32 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
         </Card>
       ) : (
         <Card>
-          <p style={{ color: B.ink, fontFamily: B.tS, margin: 0, textAlign: "center", padding: "20px 0" }}>
+          <p style={{
+            color: B.ink,
+            fontFamily: B.font,
+            margin: 0,
+            textAlign: "center",
+            padding: "20px 0",
+            fontSize: 14
+          }}>
             No tienes gastos fijos activos. Cuando añadas un gasto manual y marques la opción
             <strong> "Es un gasto fijo recurrente"</strong>, aparecerá aquí.
           </p>
         </Card>
       )}
 
+      {/* INACTIVOS — desplegable */}
       {inactivos.length > 0 && (
         <div>
-          <button
+          <Btn
+            variant="outline"
             onClick={() => setShowInactivos(!showInactivos)}
-            style={{
-              ...B.btnSm,
-              background: "transparent",
-              color: B.ink,
-              border: `1px solid ${B.border}`,
-              width: "100%",
-              padding: "10px 14px"
-            }}
+            icon={showInactivos ? ChevronDown : ChevronRight}
+            iconBefore
+            style={{ width: "100%" }}
           >
-            {showInactivos ? "▼" : "▶"} Dados de baja ({inactivos.length})
-          </button>
+            Dados de baja ({inactivos.length})
+          </Btn>
           {showInactivos && (
             <Card style={{ marginTop: 10 }}>
               <div>
@@ -541,83 +666,83 @@ export default function GastosFijos({ gastosFijos, gastos, onRefresh }) {
         </div>
       )}
 
+      {/* MODAL BAJA/REACTIVAR */}
       {bajaModal && (
-        <div style={{
-          position: "fixed",
-          top: 0, left: 0, right: 0, bottom: 0,
-          background: "rgba(0,0,0,0.55)",
-          backdropFilter: "blur(3px)",
-          zIndex: 300,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: 16
-        }}>
-          <div style={{
-            background: "#fff",
-            borderRadius: 12,
-            padding: 24,
-            maxWidth: 440,
-            width: "100%",
-            boxShadow: "0 20px 60px rgba(0,0,0,0.3)"
-          }}>
-            <div style={{ fontSize: 32, marginBottom: 10 }}>
-              {bajaModal.accion === "baja" ? "⏸" : "▶"}
+        <div
+          onClick={() => setBajaModal(null)}
+          style={{
+            position: "fixed",
+            top: 0, left: 0, right: 0, bottom: 0,
+            background: "rgba(0,0,0,0.55)",
+            backdropFilter: "blur(3px)",
+            zIndex: 300,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: "#fff",
+              borderRadius: 20,
+              padding: 28,
+              maxWidth: 440,
+              width: "100%",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+              border: `1px solid ${B.border}`
+            }}
+          >
+            <div style={{ marginBottom: 14 }}>
+              <IconPill
+                icon={bajaModal.accion === "baja" ? Pause : Play}
+                size={48}
+              />
             </div>
-            <div style={{ fontSize: 16, fontWeight: 700, fontFamily: B.tS, marginBottom: 10 }}>
+            <div style={{
+              fontSize: 18,
+              fontWeight: 700,
+              fontFamily: B.font,
+              marginBottom: 8,
+              color: B.ink,
+              letterSpacing: "-0.015em"
+            }}>
               {bajaModal.accion === "baja" ? "Dar de baja" : "Reactivar"} «{bajaModal.nombre}»
             </div>
-            <div style={{ fontSize: 13, color: B.ink, marginBottom: 20, lineHeight: 1.5 }}>
+            <div style={{
+              fontSize: 14,
+              color: B.muted,
+              marginBottom: 22,
+              lineHeight: 1.55,
+              fontFamily: B.font
+            }}>
               {bajaModal.accion === "baja"
                 ? "El gasto fijo se marcará como inactivo y no contará en el total mensual. El historial fiscal de los pagos asociados se mantiene intacto."
                 : "El gasto fijo volverá a estar activo y contará en el total mensual."}
             </div>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button onClick={confirmarBaja} style={{
-                ...B.btn,
-                background: bajaModal.accion === "baja" ? B.red : B.green,
-                flex: 1
-              }}>
-                {bajaModal.accion === "baja" ? "DAR DE BAJA" : "REACTIVAR"}
-              </button>
-              <button onClick={() => setBajaModal(null)} style={{
-                ...B.btn,
-                background: "transparent",
-                color: B.text,
-                border: `2px solid ${B.text}`,
-                flex: 1
-              }}>
-                CANCELAR
-              </button>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Btn
+                onClick={confirmarBaja}
+                icon={bajaModal.accion === "baja" ? Pause : Play}
+                iconBefore
+                style={{ flex: 1 }}
+              >
+                {bajaModal.accion === "baja" ? "Dar de baja" : "Reactivar"}
+              </Btn>
+              <Btn
+                onClick={() => setBajaModal(null)}
+                variant="outline"
+                icon={X}
+                iconBefore
+                style={{ flex: 1 }}
+              >
+                Cancelar
+              </Btn>
             </div>
           </div>
         </div>
       )}
     </div>
   );
-}
-
-function chipStyle(color) {
-  return {
-    padding: "4px 10px",
-    background: color + "15",
-    color: color,
-    borderRadius: 12,
-    fontSize: 11,
-    fontWeight: 600,
-    fontFamily: B.tS
-  };
-}
-
-function iconBtnStyle(color) {
-  return {
-    background: "transparent",
-    border: `1px solid ${color}30`,
-    borderRadius: 4,
-    padding: "5px 9px",
-    cursor: "pointer",
-    fontSize: 13,
-    color: color,
-    transition: "all 0.15s ease"
-  };
 }
