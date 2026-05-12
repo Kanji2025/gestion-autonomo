@@ -82,13 +82,13 @@ export const B = {
   bg: "#fafafa",
   surface: "#fafafa",
   card: "#fafafa",                       // alias retrocompatibilidad
-  border: "#000000",
+  border: "#ececec",
   text: "#000000",
   ink: "#000000",                        // alias semántico
-  muted: "#000000",
-  inkMuted: "#000000",                   // alias
-  soft: "#000000",
-  inkSoft: "#000000",                    // alias
+  muted: "#666666",
+  inkMuted: "#666666",                   // alias
+  soft: "#999999",
+  inkSoft: "#999999",                    // alias
 
   // Acentos de marca
   yellow: "#f0e991",
