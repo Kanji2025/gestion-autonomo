@@ -1,16 +1,24 @@
 // src/components/Facturas.jsx
 // Sección de Facturas (Ingresos): listado + buscador + edición + duplicado + borrado.
-// Menú de 3 puntos (⋮) con Editar/Duplicar/Borrar.
+// REDISEÑO 2026 paleta marca. Mantiene toda la lógica (OCR, duplicar, edit inline).
 
 import { useState, useEffect, useRef } from "react";
+import {
+  Plus, Sparkles, Search, Calendar, MoreVertical,
+  Edit3, Copy, Trash2, Check, X, Info,
+  Receipt, Wallet, CheckCircle2, Clock
+} from "lucide-react";
+
 import { B, fmt, hoy, applyF } from "../utils.js";
 import { useResponsive } from "../hooks/useResponsive.js";
 import { createRecord, updateRecord, deleteRecord } from "../api.js";
-import { Card, Lbl, Inp, Sel, Sem, SectionHeader, FilterBar } from "./UI.jsx";
+import {
+  Card, Lbl, Inp, Sel, StatusPill, PageHeader, FilterBar, Btn, IconPill
+} from "./UI.jsx";
 import NuevoForm from "./NuevoForm.jsx";
 
 // ============================================================
-// MENÚ DE 3 PUNTOS
+// MENÚ DE 3 PUNTOS — iconos lucide, todo negro
 // ============================================================
 function DotMenu({ onEdit, onDuplicate, onDelete, disabled }) {
   const [open, setOpen] = useState(false);
@@ -34,71 +42,107 @@ function DotMenu({ onEdit, onDuplicate, onDelete, disabled }) {
         style={{
           background: "transparent",
           border: `1px solid ${B.border}`,
-          borderRadius: 4,
-          padding: "4px 10px",
+          borderRadius: 999,
+          padding: 6,
           cursor: disabled ? "not-allowed" : "pointer",
-          fontSize: 14,
-          fontWeight: 700,
           color: B.muted,
           opacity: disabled ? 0.5 : 1,
-          lineHeight: 1
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center"
         }}
         aria-label="Opciones"
       >
-        ⋮
+        <MoreVertical size={14} strokeWidth={2} />
       </button>
       {open && (
         <div style={{
           position: "absolute",
           right: 0,
-          top: "calc(100% + 4px)",
+          top: "calc(100% + 6px)",
           background: "#fff",
           border: `1px solid ${B.border}`,
-          borderRadius: 6,
-          boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-          minWidth: 140,
+          borderRadius: 12,
+          boxShadow: "0 8px 24px rgba(0,0,0,0.10)",
+          minWidth: 160,
           zIndex: 50,
           overflow: "hidden"
         }}>
-          <button
-            onClick={() => { setOpen(false); onEdit(); }}
-            style={menuItemStyle(B.text)}
-          >
-            ✏️ Editar
-          </button>
-          <button
-            onClick={() => { setOpen(false); onDuplicate(); }}
-            style={menuItemStyle(B.purple)}
-          >
-            📋 Duplicar
-          </button>
-          <button
-            onClick={() => { setOpen(false); onDelete(); }}
-            style={menuItemStyle(B.red)}
-          >
-            🗑 Borrar
-          </button>
+          <MenuItem icon={Edit3} onClick={() => { setOpen(false); onEdit(); }}>
+            Editar
+          </MenuItem>
+          <MenuItem icon={Copy} onClick={() => { setOpen(false); onDuplicate(); }}>
+            Duplicar
+          </MenuItem>
+          <MenuItem icon={Trash2} onClick={() => { setOpen(false); onDelete(); }}>
+            Borrar
+          </MenuItem>
         </div>
       )}
     </div>
   );
 }
 
-function menuItemStyle(color) {
-  return {
-    display: "block",
-    width: "100%",
-    padding: "10px 14px",
-    textAlign: "left",
-    background: "transparent",
-    border: "none",
-    cursor: "pointer",
-    fontSize: 13,
-    fontWeight: 600,
-    fontFamily: B.tS,
-    color,
-    transition: "background 0.1s ease"
-  };
+function MenuItem({ icon: Icon, onClick, children }) {
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={(e) => (e.currentTarget.style.background = "#f8f8f8")}
+      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        width: "100%",
+        padding: "10px 14px",
+        textAlign: "left",
+        background: "transparent",
+        border: "none",
+        cursor: "pointer",
+        fontSize: 13,
+        fontWeight: 500,
+        fontFamily: B.font,
+        color: B.ink,
+        transition: "background 0.12s ease"
+      }}
+    >
+      <Icon size={14} strokeWidth={2} />
+      {children}
+    </button>
+  );
+}
+
+// ============================================================
+// SUB-COMPONENTE KPI (4 tarjetas arriba)
+// ============================================================
+function KPICard({ icon: Icon, label, value, hint }) {
+  return (
+    <Card>
+      <IconPill icon={Icon} />
+      <div style={{ marginTop: 14 }}>
+        <Lbl>{label}</Lbl>
+      </div>
+      <div style={{
+        fontSize: B.ty.numL,
+        fontWeight: 700,
+        marginTop: 6,
+        color: B.ink,
+        letterSpacing: "-0.02em",
+        fontFamily: B.font,
+        ...B.num
+      }}>
+        {value}
+      </div>
+      <div style={{
+        fontSize: B.ty.small,
+        color: B.muted,
+        marginTop: 4,
+        fontFamily: B.font
+      }}>
+        {hint}
+      </div>
+    </Card>
+  );
 }
 
 // ============================================================
@@ -126,14 +170,16 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
 
   const facturasProcesadas = fi.map(f => {
     const clienteIds = f.fields["Cliente"] || [];
-    const clienteNombre = clienteIds.length > 0 ? (clienteMap[clienteIds[0]] || "Cliente eliminado") : "Sin cliente";
+    const clienteNombre = clienteIds.length > 0
+      ? (clienteMap[clienteIds[0]] || "Cliente eliminado")
+      : "Sin cliente";
     const base = f.fields["Base Imponible"] || 0;
     const iva = f.fields["IVA (€)"] || 0;
     const irpf = f.fields["IRPF (€)"] || 0;
     return {
       id: f.id,
       raw: f,
-      numero: f.fields["Nº Factura"] || "-",
+      numero: f.fields["Nº Factura"] || "—",
       fecha: f.fields["Fecha"] || "",
       clienteId: clienteIds[0] || null,
       cliente: clienteNombre,
@@ -149,8 +195,7 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
   }).filter(f => {
     if (!search) return true;
     const s = search.toLowerCase();
-    return f.numero.toLowerCase().includes(s) ||
-           f.cliente.toLowerCase().includes(s);
+    return f.numero.toLowerCase().includes(s) || f.cliente.toLowerCase().includes(s);
   }).sort((a, b) => {
     if (!a.fecha) return 1;
     if (!b.fecha) return -1;
@@ -163,7 +208,7 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
   const startEdit = (f) => {
     setEditId(f.id);
     setEditForm({
-      numero: f.numero === "-" ? "" : f.numero,
+      numero: f.numero === "—" ? "" : f.numero,
       fecha: f.fecha || hoy(),
       base: String(f.base || ""),
       iva: String(f.iva || ""),
@@ -228,11 +273,10 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
   };
 
   // ============================================================
-  // DUPLICAR
+  // DUPLICAR (lógica intacta: no enviamos IVA/IRPF porque son fórmulas)
   // ============================================================
-const duplicar = async (f) => {
+  const duplicar = async (f) => {
     try {
-      // NO enviamos IVA ni IRPF porque son fórmulas en Airtable (se calculan solas desde Base)
       const copia = {
         "Nº Factura": "",
         "Fecha": hoy(),
@@ -244,7 +288,6 @@ const duplicar = async (f) => {
       const created = await createRecord("Ingresos", copia);
       const nuevoId = created.records?.[0]?.id;
 
-      // Abrir el editor ANTES del refresh, para que al actualizarse la lista ya esté listo
       if (nuevoId) {
         setEditId(nuevoId);
         setEditForm({
@@ -263,7 +306,7 @@ const duplicar = async (f) => {
     } catch (e) {
       alert("Error al duplicar: " + e.message);
     }
-  }; 
+  };
 
   // ============================================================
   // CAMBIO DE ESTADO RÁPIDO
@@ -280,7 +323,7 @@ const duplicar = async (f) => {
   };
 
   // ============================================================
-  // NUEVA FACTURA (OCR)
+  // FORMULARIO DE NUEVA FACTURA (OCR + IA → NuevoForm)
   // ============================================================
   if (showNueva) {
     return (
@@ -294,69 +337,81 @@ const duplicar = async (f) => {
   }
 
   // ============================================================
-  // EDITOR INLINE
+  // EDITOR INLINE — Card con borde negro destacado
   // ============================================================
   const renderEditForm = () => (
-    <Card style={{ border: `2px solid ${B.purple}`, marginTop: 8, marginBottom: 8 }}>
-      <Lbl><span style={{ color: B.purple }}>EDITAR FACTURA</span></Lbl>
+    <Card style={{
+      border: `1px solid ${B.ink}`,
+      marginTop: 8,
+      marginBottom: 8
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+        <IconPill icon={Edit3} size={28} />
+        <Lbl>Editar factura</Lbl>
+      </div>
       <div style={{
         display: "grid",
         gridTemplateColumns: `repeat(${formColumns}, 1fr)`,
-        gap: 14,
-        marginTop: 14
+        gap: 14
       }}>
         <Inp label="Nº Factura" value={editForm.numero} onChange={v => setEditForm({ ...editForm, numero: v })} ph="F00012026" />
         <Inp label="Fecha" value={editForm.fecha} onChange={v => setEditForm({ ...editForm, fecha: v })} type="date" />
-        <Inp label="Base Imponible (€)" value={editForm.base} onChange={v => setEditForm({ ...editForm, base: v })} type="number" />
-        <Inp label="IVA (€)" value={editForm.iva} onChange={v => setEditForm({ ...editForm, iva: v })} type="number" ph="0 si es exenta" />
+        <Inp label="Base imponible (€)" value={editForm.base} onChange={v => setEditForm({ ...editForm, base: v })} type="number" />
+        <Inp label="IVA (€)" value={editForm.iva} onChange={v => setEditForm({ ...editForm, iva: v })} type="number" ph="0 si exenta" />
         <Inp label="IRPF (€)" value={editForm.irpf} onChange={v => setEditForm({ ...editForm, irpf: v })} type="number" ph="0 si no aplica" />
         <Sel label="Estado" value={editForm.estado} onChange={v => setEditForm({ ...editForm, estado: v })} options={["Cobrada", "Pendiente", "Vencida"]} />
-        <Inp label="Fecha Vencimiento" value={editForm.fechaVenc} onChange={v => setEditForm({ ...editForm, fechaVenc: v })} type="date" />
-        <Inp label="Fecha Cobro" value={editForm.fechaCobro} onChange={v => setEditForm({ ...editForm, fechaCobro: v })} type="date" />
+        <Inp label="Fecha de vencimiento" value={editForm.fechaVenc} onChange={v => setEditForm({ ...editForm, fechaVenc: v })} type="date" />
+        <Inp label="Fecha de cobro" value={editForm.fechaCobro} onChange={v => setEditForm({ ...editForm, fechaCobro: v })} type="date" />
       </div>
 
       <div style={{
-        marginTop: 12,
-        padding: "8px 12px",
-        background: B.muted + "10",
-        borderRadius: 6,
-        fontSize: 11,
+        marginTop: 14,
+        padding: "12px 14px",
+        background: "#fafafa",
+        border: `1px solid ${B.border}`,
+        borderRadius: 12,
+        fontSize: 12,
         color: B.muted,
-        fontFamily: B.tS
+        fontFamily: B.font,
+        lineHeight: 1.5,
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 8
       }}>
-        ℹ️ Si los campos IVA/IRPF en tu Airtable son fórmulas automáticas, los valores que escribas aquí se ignorarán.
+        <Info size={13} strokeWidth={2.25} style={{ flexShrink: 0, marginTop: 2 }} />
+        <span>
+          Si en Airtable los campos <strong>IVA</strong> e <strong>IRPF</strong> son fórmulas automáticas (calculados desde la base), los valores que escribas aquí se ignorarán.
+        </span>
       </div>
 
-      <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-        <button onClick={saveEdit} disabled={savingEdit} style={{ ...B.btn, flex: 1, opacity: savingEdit ? 0.5 : 1 }}>
-          {savingEdit ? "GUARDANDO..." : "GUARDAR CAMBIOS"}
-        </button>
-        <button onClick={cancelEdit} style={{
-          ...B.btn,
-          flex: 1,
-          background: "transparent",
-          color: B.text,
-          border: `2px solid ${B.text}`
-        }}>
-          CANCELAR
-        </button>
+      <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
+        <Btn onClick={saveEdit} disabled={savingEdit} icon={Check} iconBefore>
+          {savingEdit ? "Guardando…" : "Guardar cambios"}
+        </Btn>
+        <Btn onClick={cancelEdit} variant="outline" icon={X} iconBefore>
+          Cancelar
+        </Btn>
       </div>
     </Card>
   );
 
   // ============================================================
-  // RENDER DE UNA FACTURA
+  // ITEM DE UNA FACTURA
   // ============================================================
   const renderFactura = (f) => {
     if (editId === f.id) return <div key={f.id}>{renderEditForm()}</div>;
 
     return (
-      <div key={f.id} style={{
-        padding: "14px 16px",
-        background: "rgba(0,0,0,0.03)",
-        borderRadius: 8,
-        marginBottom: 8
-      }}>
+      <div
+        key={f.id}
+        style={{
+          background: "#fafafa",
+          border: `1px solid ${B.border}`,
+          borderRadius: 14,
+          padding: "14px 16px",
+          marginBottom: 10
+        }}
+      >
         <div style={{
           display: "flex",
           justifyContent: "space-between",
@@ -365,57 +420,114 @@ const duplicar = async (f) => {
           flexWrap: "wrap"
         }}>
           <div style={{ flex: 1, minWidth: 200 }}>
+            {/* Nº factura + StatusPill */}
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontWeight: 700, fontFamily: B.tM, fontSize: 13 }}>
+              <span style={{
+                fontWeight: 700,
+                fontFamily: B.font,
+                fontSize: 13,
+                color: B.ink,
+                ...B.num
+              }}>
                 {f.numero}
               </span>
-              <Sem estado={f.estado} />
+              <StatusPill estado={f.estado} />
             </div>
-            <div style={{ fontWeight: 600, fontSize: 14, fontFamily: B.tS, marginTop: 4 }}>
+            {/* Cliente */}
+            <div style={{
+              fontWeight: 600,
+              fontSize: 15,
+              fontFamily: B.font,
+              marginTop: 6,
+              color: B.ink,
+              letterSpacing: "-0.01em"
+            }}>
               {f.cliente}
             </div>
-            <div style={{ fontSize: 12, color: B.muted, marginTop: 2, fontFamily: B.tM }}>
-              📅 {f.fecha || "Sin fecha"}
-              {f.fechaVenc && <span> · Vence: {f.fechaVenc}</span>}
-              {f.fechaCobro && <span> · Cobrada: {f.fechaCobro}</span>}
+            {/* Fechas */}
+            <div style={{
+              fontSize: 12,
+              color: B.muted,
+              marginTop: 4,
+              fontFamily: B.font,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              flexWrap: "wrap"
+            }}>
+              <Calendar size={11} strokeWidth={2} />
+              <span style={B.num}>{f.fecha || "Sin fecha"}</span>
+              {f.fechaVenc && <span style={B.num}> · Vence {f.fechaVenc}</span>}
+              {f.fechaCobro && <span style={B.num}> · Cobrada {f.fechaCobro}</span>}
             </div>
-            <div style={{ fontSize: 11, color: B.muted, marginTop: 4, display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <span>Base: <strong style={{ color: B.text }}>{fmt(f.base)}</strong></span>
-              <span>IVA: <strong style={{ color: B.green }}>{fmt(f.iva)}</strong></span>
-              {f.irpf > 0 && <span>IRPF: <strong style={{ color: B.red }}>{fmt(f.irpf)}</strong></span>}
+            {/* Desglose Base / IVA / IRPF */}
+            <div style={{
+              fontSize: 11,
+              color: B.muted,
+              marginTop: 8,
+              display: "flex",
+              gap: 14,
+              flexWrap: "wrap",
+              fontWeight: 500
+            }}>
+              <span style={B.num}>Base · <strong style={{ color: B.ink }}>{fmt(f.base)}</strong></span>
+              <span style={B.num}>IVA · <strong style={{ color: B.ink }}>{fmt(f.iva)}</strong></span>
+              {f.irpf > 0 && <span style={B.num}>IRPF · <strong style={{ color: B.ink }}>{fmt(f.irpf)}</strong></span>}
             </div>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
-            <div style={{ fontWeight: 700, fontFamily: B.tM, fontSize: 16 }}>
+          {/* Columna derecha: total + neto + controles */}
+          <div style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: 8
+          }}>
+            <div style={{
+              fontWeight: 700,
+              fontFamily: B.font,
+              fontSize: B.ty.numM,
+              color: B.ink,
+              letterSpacing: "-0.015em",
+              ...B.num
+            }}>
               {fmt(f.totalConIva)}
             </div>
-            <div style={{ fontSize: 11, color: B.green, fontWeight: 600 }}>
-              Neto: {fmt(f.neto)}
+            <div style={{
+              fontSize: 11,
+              color: B.muted,
+              fontWeight: 500,
+              ...B.num
+            }}>
+              Neto · {fmt(f.neto)}
             </div>
-            <select
-              value={f.estado}
-              onChange={e => cambiarEstado(f.id, e.target.value)}
-              style={{
-                padding: "4px 8px",
-                borderRadius: 4,
-                border: `1px solid ${B.border}`,
-                fontSize: 11,
-                fontFamily: B.tM,
-                cursor: "pointer",
-                background: "#fff"
-              }}
-            >
-              <option value="Pendiente">Pendiente</option>
-              <option value="Cobrada">Cobrada</option>
-              <option value="Vencida">Vencida</option>
-            </select>
-            <DotMenu
-              onEdit={() => startEdit(f)}
-              onDuplicate={() => duplicar(f)}
-              onDelete={() => del(f.id)}
-              disabled={delId === f.id}
-            />
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <select
+                value={f.estado}
+                onChange={e => cambiarEstado(f.id, e.target.value)}
+                style={{
+                  padding: "5px 10px",
+                  borderRadius: 999,
+                  border: `1px solid ${B.border}`,
+                  fontSize: 11,
+                  fontFamily: B.font,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  background: "#fff",
+                  color: B.ink
+                }}
+              >
+                <option value="Pendiente">Pendiente</option>
+                <option value="Cobrada">Cobrada</option>
+                <option value="Vencida">Vencida</option>
+              </select>
+              <DotMenu
+                onEdit={() => startEdit(f)}
+                onDuplicate={() => duplicar(f)}
+                onDelete={() => del(f.id)}
+                disabled={delId === f.id}
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -427,71 +539,119 @@ const duplicar = async (f) => {
   // ============================================================
   const totalBase = facturasProcesadas.reduce((s, f) => s + f.base, 0);
   const totalNeto = facturasProcesadas.reduce((s, f) => s + f.neto, 0);
-  const totalCobradas = facturasProcesadas.filter(f => f.estado === "Cobrada").reduce((s, f) => s + f.base, 0);
-  const totalPendientes = facturasProcesadas.filter(f => f.estado === "Pendiente" || f.estado === "Vencida").reduce((s, f) => s + f.base, 0);
+  const totalCobradas = facturasProcesadas
+    .filter(f => f.estado === "Cobrada")
+    .reduce((s, f) => s + f.base, 0);
+  const totalPendientes = facturasProcesadas
+    .filter(f => f.estado === "Pendiente" || f.estado === "Vencida")
+    .reduce((s, f) => s + f.base, 0);
 
+  // ============================================================
+  // RENDER PRINCIPAL
+  // ============================================================
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-      <SectionHeader
-        title="Facturas"
+      <PageHeader
+        title="Facturas."
+        subtitle="Lo que has emitido, lo que has cobrado y lo que sigue pendiente."
         action={
-          <button onClick={() => setShowNueva(true)} style={B.btn}>
-            + NUEVA FACTURA
-          </button>
+          <Btn
+            onClick={() => setShowNueva(true)}
+            icon={Sparkles}
+            iconBefore
+            style={{
+              background: B.lavender,
+              color: B.ink,
+              border: `1px solid ${B.ink}`
+            }}
+          >
+            Nueva factura
+          </Btn>
         }
       />
 
       <FilterBar filtro={filtro} setFiltro={setFiltro} />
 
-      <input
-        type="text"
-        placeholder="Buscar por nº factura o cliente..."
-        value={search}
-        onChange={e => setSearch(e.target.value)}
-        style={{
-          ...B.inp,
-          maxWidth: isMobile ? "100%" : 360,
-          padding: "10px 14px",
-          fontSize: 13
-        }}
-      />
-
-      {/* KPIs */}
+      {/* Buscador con icono Search */}
       <div style={{
-        display: "grid",
-        gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)",
-        gap: 10
+        position: "relative",
+        flex: isMobile ? "1 1 100%" : "0 0 360px",
+        maxWidth: "100%"
       }}>
-        <div style={{ background: B.card, padding: "12px 14px", borderRadius: 8, border: `1px solid ${B.border}` }}>
-          <div style={{ fontSize: 10, color: B.muted, fontFamily: B.tM, textTransform: "uppercase" }}>Base Total</div>
-          <div style={{ fontSize: 18, fontWeight: 700, fontFamily: B.tM, color: B.purple }}>{fmt(totalBase)}</div>
-        </div>
-        <div style={{ background: B.card, padding: "12px 14px", borderRadius: 8, border: `1px solid ${B.border}` }}>
-          <div style={{ fontSize: 10, color: B.muted, fontFamily: B.tM, textTransform: "uppercase" }}>Neto (sin IRPF)</div>
-          <div style={{ fontSize: 18, fontWeight: 700, fontFamily: B.tM, color: B.green }}>{fmt(totalNeto)}</div>
-        </div>
-        <div style={{ background: B.card, padding: "12px 14px", borderRadius: 8, border: `1px solid ${B.border}` }}>
-          <div style={{ fontSize: 10, color: B.muted, fontFamily: B.tM, textTransform: "uppercase" }}>Cobrado</div>
-          <div style={{ fontSize: 18, fontWeight: 700, fontFamily: B.tM, color: B.green }}>{fmt(totalCobradas)}</div>
-        </div>
-        <div style={{ background: B.card, padding: "12px 14px", borderRadius: 8, border: `1px solid ${B.border}` }}>
-          <div style={{ fontSize: 10, color: B.muted, fontFamily: B.tM, textTransform: "uppercase" }}>Pendiente</div>
-          <div style={{ fontSize: 18, fontWeight: 700, fontFamily: B.tM, color: B.amber }}>{fmt(totalPendientes)}</div>
-        </div>
+        <Search
+          size={15}
+          strokeWidth={2}
+          style={{
+            position: "absolute",
+            left: 14,
+            top: "50%",
+            transform: "translateY(-50%)",
+            color: B.muted,
+            pointerEvents: "none"
+          }}
+        />
+        <input
+          type="text"
+          placeholder="Buscar por nº de factura o cliente…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{
+            ...B.inp,
+            padding: "10px 14px 10px 38px",
+            fontSize: 13
+          }}
+          onFocus={e => (e.target.style.borderColor = B.ink)}
+          onBlur={e => (e.target.style.borderColor = B.border)}
+        />
       </div>
 
-      {/* Lista */}
+      {/* KPIs — 4 tarjetas en negro plano */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)",
+        gap: 12
+      }}>
+        <KPICard
+          icon={Receipt}
+          label="Base total"
+          value={fmt(totalBase)}
+          hint="Facturado bruto"
+        />
+        <KPICard
+          icon={Wallet}
+          label="Neto (sin IRPF)"
+          value={fmt(totalNeto)}
+          hint="Lo que te queda"
+        />
+        <KPICard
+          icon={CheckCircle2}
+          label="Cobrado"
+          value={fmt(totalCobradas)}
+          hint="En tu cuenta"
+        />
+        <KPICard
+          icon={Clock}
+          label="Pendiente"
+          value={fmt(totalPendientes)}
+          hint="Por cobrar"
+        />
+      </div>
+
+      {/* Lista vacía */}
       {facturasProcesadas.length === 0 && (
         <Card>
-          <p style={{ color: B.muted, fontFamily: B.tS, margin: 0 }}>
-            No hay facturas {search ? "que coincidan con la búsqueda" : "en el período seleccionado"}.
+          <p style={{ color: B.muted, fontFamily: B.font, margin: 0, fontSize: 14 }}>
+            {search
+              ? "No hay facturas que coincidan con la búsqueda."
+              : "No hay facturas en el período seleccionado. Crea una nueva con OCR o manualmente."}
           </p>
         </Card>
       )}
 
+      {/* Listado */}
       {facturasProcesadas.length > 0 && (
         <Card>
-          <Lbl>Listado ({facturasProcesadas.length})</Lbl>
+          <Lbl>Listado del período ({facturasProcesadas.length})</Lbl>
           <div style={{ marginTop: 14 }}>
             {facturasProcesadas.map(renderFactura)}
           </div>
