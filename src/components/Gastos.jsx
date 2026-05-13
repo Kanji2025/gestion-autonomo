@@ -7,7 +7,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   Plus, X, Sparkles, Edit3, Copy, Trash2, Check,
   Calendar, Repeat, Link as LinkIcon, MoreVertical,
-  Receipt, Percent, Hash
+  Receipt, Percent, Hash, Search
 } from "lucide-react";
 
 import { B, fmt, hoy, applyF } from "../utils.js";
@@ -164,7 +164,27 @@ export default function GastosView({ gastos, gastosFijos, onRefresh, filtro, set
     monedaFijo: "EUR"
   });
 
-const fg = applyF(gastos, filtro);
+const [search, setSearch] = useState("");
+
+  // Filtro de fechas + buscador (concepto, proveedor, CIF)
+  const fgRaw = applyF(gastos, filtro);
+  const fg = fgRaw.filter(r => {
+    if (!search.trim()) return true;
+    const s = search.toLowerCase().trim();
+    const concepto = (r.fields["Concepto"] || "").toLowerCase();
+    // Si está vinculado a un Gasto Fijo, buscar también por proveedor/CIF del fijo
+    const gastoFijoIds = r.fields["Gasto Fijo"] || [];
+    let proveedor = "";
+    let cif = "";
+    if (gastoFijoIds.length > 0) {
+      const gf = (gastosFijos || []).find(g => g.id === gastoFijoIds[0]);
+      if (gf) {
+        proveedor = (gf.fields["Proveedor"] || "").toLowerCase();
+        cif = (gf.fields["CIF Proveedor"] || "").toLowerCase();
+      }
+    }
+    return concepto.includes(s) || proveedor.includes(s) || cif.includes(s);
+  });
   const fijos = fg.filter(r => ["Mensual", "Anual", "Trimestral"].includes(r.fields["Periodicidad"]));
   const vars = fg.filter(r => !["Mensual", "Anual", "Trimestral"].includes(r.fields["Periodicidad"]));
 
