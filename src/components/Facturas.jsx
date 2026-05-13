@@ -573,9 +573,9 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
       <FilterBar filtro={filtro} setFiltro={setFiltro} />
 
       {/* Buscador con icono Search */}
-      <div style={{
+     <div style={{
         position: "relative",
-        flex: isMobile ? "1 1 100%" : "0 0 360px",
+        width: isMobile ? "100%" : 360,
         maxWidth: "100%"
       }}>
         <Search
