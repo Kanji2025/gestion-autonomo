@@ -186,7 +186,7 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
       base,
       iva,
       irpf,
-      totalConIva: base + iva,
+      totalConIva: base + iva - irpf,
       neto: base - irpf,
       estado: f.fields["Estado"] || "Pendiente",
       fechaVenc: f.fields["Fecha Vencimiento"] || "",
