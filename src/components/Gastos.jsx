@@ -556,7 +556,40 @@ const [search, setSearch] = useState("");
         }
       />
 
-     <FilterBar filtro={filtro} setFiltro={setFiltro} />
+   <FilterBar filtro={filtro} setFiltro={setFiltro} />
+
+      {/* BUSCADOR — concepto, proveedor o CIF */}
+      <div style={{
+        position: "relative",
+        width: isMobile ? "100%" : 360,
+        maxWidth: "100%"
+      }}>
+        <Search
+          size={15}
+          strokeWidth={2}
+          style={{
+            position: "absolute",
+            left: 14,
+            top: "50%",
+            transform: "translateY(-50%)",
+            color: B.muted,
+            pointerEvents: "none"
+          }}
+        />
+        <input
+          type="text"
+          placeholder="Buscar por concepto, proveedor o CIF…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{
+            ...B.inp,
+            padding: "10px 14px 10px 38px",
+            fontSize: 13
+          }}
+          onFocus={e => (e.target.style.borderColor = B.ink)}
+          onBlur={e => (e.target.style.borderColor = B.border)}
+        />
+      </div>
 
       {/* KPIs DEL PERÍODO — total, IVA soportado, nº de gastos */}
       <div style={{
