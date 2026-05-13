@@ -159,16 +159,16 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
   const [savingEdit, setSavingEdit] = useState(false);
 
   // ============================================================
-  // PROCESAR Y FILTRAR FACTURAS
+  // PROCESAR FACTURAS
+  // facturasAll = TODAS las facturas procesadas (para KPIs estables)
+  // facturasProcesadas = filtradas por fecha + búsqueda (para listado)
   // ============================================================
-  const fi = applyF(ingresos, filtro);
-
   const clienteMap = {};
   clientes.forEach(c => {
     clienteMap[c.id] = c.fields["Nombre"] || "Sin nombre";
   });
 
-  const facturasProcesadas = fi.map(f => {
+  const procesar = (f) => {
     const clienteIds = f.fields["Cliente"] || [];
     const clienteNombre = clienteIds.length > 0
       ? (clienteMap[clienteIds[0]] || "Cliente eliminado")
@@ -192,7 +192,13 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
       fechaVenc: f.fields["Fecha Vencimiento"] || "",
       fechaCobro: f.fields["Fecha Cobro"] || ""
     };
-  }).filter(f => {
+  };
+
+  // Todas las facturas (para KPIs)
+  const facturasAll = ingresos.map(procesar);
+
+  // Filtradas por fecha + búsqueda (para listado)
+  const facturasProcesadas = applyF(ingresos, filtro).map(procesar).filter(f => {
     if (!search) return true;
     const s = search.toLowerCase();
     return f.numero.toLowerCase().includes(s) || f.cliente.toLowerCase().includes(s);
