@@ -543,12 +543,12 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
   // ============================================================
   // KPIs (totales del listado filtrado)
   // ============================================================
-  const totalBase = facturasProcesadas.reduce((s, f) => s + f.base, 0);
-  const totalNeto = facturasProcesadas.reduce((s, f) => s + f.neto, 0);
-  const totalCobradas = facturasProcesadas
+  const totalBase = facturasAll.reduce((s, f) => s + f.base, 0);
+  const totalNeto = facturasAll.reduce((s, f) => s + f.neto, 0);
+  const totalCobradas = facturasAll
     .filter(f => f.estado === "Cobrada")
     .reduce((s, f) => s + f.base, 0);
-  const totalPendientes = facturasProcesadas
+  const totalPendientes = facturasAll
     .filter(f => f.estado === "Pendiente" || f.estado === "Vencida")
     .reduce((s, f) => s + f.base, 0);
 
@@ -576,42 +576,7 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
         }
       />
 
-      <FilterBar filtro={filtro} setFiltro={setFiltro} />
-
-      {/* Buscador con icono Search */}
-     <div style={{
-        position: "relative",
-        width: isMobile ? "100%" : 360,
-        maxWidth: "100%"
-      }}>
-        <Search
-          size={15}
-          strokeWidth={2}
-          style={{
-            position: "absolute",
-            left: 14,
-            top: "50%",
-            transform: "translateY(-50%)",
-            color: B.muted,
-            pointerEvents: "none"
-          }}
-        />
-        <input
-          type="text"
-          placeholder="Buscar por nº de factura o cliente…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          style={{
-            ...B.inp,
-            padding: "10px 14px 10px 38px",
-            fontSize: 13
-          }}
-          onFocus={e => (e.target.style.borderColor = B.ink)}
-          onBlur={e => (e.target.style.borderColor = B.border)}
-        />
-      </div>
-
-      {/* KPIs — 4 tarjetas en negro plano */}
+      {/* KPIs — acumulados totales */}
       <div style={{
         display: "grid",
         gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)",
@@ -643,6 +608,47 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
         />
       </div>
 
+      {/* FILTROS Y BÚSQUEDA — afectan solo al listado de abajo */}
+      <div style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        marginTop: 4
+      }}>
+        <FilterBar filtro={filtro} setFiltro={setFiltro} />
+        <div style={{
+          position: "relative",
+          width: isMobile ? "100%" : 360,
+          maxWidth: "100%"
+        }}>
+          <Search
+            size={15}
+            strokeWidth={2}
+            style={{
+              position: "absolute",
+              left: 14,
+              top: "50%",
+              transform: "translateY(-50%)",
+              color: B.muted,
+              pointerEvents: "none"
+            }}
+          />
+          <input
+            type="text"
+            placeholder="Buscar por nº de factura o cliente…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{
+              ...B.inp,
+              padding: "10px 14px 10px 38px",
+              fontSize: 13
+            }}
+            onFocus={e => (e.target.style.borderColor = B.ink)}
+            onBlur={e => (e.target.style.borderColor = B.border)}
+          />
+        </div>
+      </div>
+
       {/* Lista vacía */}
       {facturasProcesadas.length === 0 && (
         <Card>
@@ -654,10 +660,10 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
         </Card>
       )}
 
-      {/* Listado */}
+      {/* Listado — filtrado por filtros y búsqueda */}
       {facturasProcesadas.length > 0 && (
         <Card>
-          <Lbl>Listado del período ({facturasProcesadas.length})</Lbl>
+          <Lbl>Resultados ({facturasProcesadas.length})</Lbl>
           <div style={{ marginTop: 14 }}>
             {facturasProcesadas.map(renderFactura)}
           </div>
