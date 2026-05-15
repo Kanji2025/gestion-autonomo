@@ -1,12 +1,13 @@
 // src/App.jsx
 // Cerebro principal: routing, autenticación, carga de datos, campanita, pop-up.
 // REDISEÑO 2026: header con KanjiMark + sidebar overlay con iconos lucide.
+// v2: botón ↻ Actualizar en header para reducir llamadas API a Airtable.
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Menu, X, Calendar, LogOut, Bell as BellIcon,
   LayoutDashboard, FileText, Users, Receipt, Repeat,
-  Bell, Calculator, ShieldCheck
+  Bell, Calculator, ShieldCheck, RefreshCw
 } from "lucide-react";
 
 import { B, MENU } from "./utils.js";
@@ -36,7 +37,6 @@ import NotificationDropdown from "./components/NotificationDropdown.jsx";
 const FONTS_LINK = "https://fonts.googleapis.com/css2?family=Work+Sans:wght@300;400;500;600;700;800&display=swap";
 const POPUP_SHOWN_DATE_KEY = "ga_popup_shown_date";
 
-// Mapa de iconos lucide para cada item del MENU
 const MENU_ICONS = {
   LayoutDashboard,
   FileText,
@@ -49,7 +49,7 @@ const MENU_ICONS = {
 };
 
 // ============================================================
-// COMPONENTE CAMPANITA — refinado con lucide Bell + badge negro
+// COMPONENTE CAMPANITA
 // ============================================================
 function NotificationBell({ count, onClick, isMobile, active }) {
   return (
@@ -135,6 +135,7 @@ export default function App() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
 
   const [ingresos, setI] = useState([]);
   const [gastos, setG] = useState([]);
@@ -164,9 +165,12 @@ export default function App() {
 
   // ============================================================
   // CARGA DE DATOS
+  // silent=false → carga inicial con pantalla completa
+  // silent=true  → recarga silenciosa con icono girando (botón ↻)
   // ============================================================
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    else setRefreshing(true);
     setLoadError("");
     try {
       const [i, g, c, t, a, gf] = await Promise.all([
@@ -186,7 +190,8 @@ export default function App() {
         setAuth(false);
       }
     }
-    setLoading(false);
+    if (!silent) setLoading(false);
+    else setRefreshing(false);
   }, []);
 
   useEffect(() => { if (auth) load(); }, [auth, load]);
@@ -196,7 +201,7 @@ export default function App() {
   }, []);
 
   const refreshAll = useCallback(async () => {
-    await load();
+    await load(true);
     refreshLocal();
   }, [load, refreshLocal]);
 
@@ -232,7 +237,6 @@ export default function App() {
   }, [auth, loading, popupCheckedThisSession, pendingAlerts]);
 
   const bellCount = pendingAlerts.length;
-
   const closePopup = () => setPopupAlerts([]);
   const onAlertDismissed = async () => { await refreshAll(); };
 
@@ -342,8 +346,9 @@ export default function App() {
       position: "relative"
     }}>
       <link href={FONTS_LINK} rel="stylesheet" />
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
-      {/* HEADER — fondo sólido blanco con KanjiMark */}
+      {/* HEADER */}
       <header style={{
         background: B.surface,
         borderBottom: `1px solid ${B.border}`,
@@ -358,6 +363,7 @@ export default function App() {
         boxSizing: "border-box",
         gap: 12
       }}>
+        {/* IZQUIERDA: hamburguesa + logo */}
         <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
           <button
             onClick={() => setOpen(!open)}
@@ -390,7 +396,8 @@ export default function App() {
           </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 12 }}>
+        {/* DERECHA: fecha + botón actualizar + campanita + salir */}
+        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 4 : 10 }}>
           {!isMobile && (
             <div style={{
               display: "flex",
@@ -412,6 +419,33 @@ export default function App() {
             </div>
           )}
 
+          {/* BOTÓN ACTUALIZAR ↻ — recarga silenciosa sin pantalla de carga */}
+          <button
+            onClick={() => { load(true); refreshLocal(); }}
+            disabled={refreshing}
+            title="Actualizar datos"
+            aria-label="Actualizar"
+            style={{
+              background: "transparent",
+              border: "none",
+              cursor: refreshing ? "not-allowed" : "pointer",
+              padding: 8,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 999,
+              opacity: refreshing ? 0.4 : 1,
+              transition: "opacity 0.15s ease"
+            }}
+          >
+            <RefreshCw
+              size={isMobile ? 16 : 18}
+              strokeWidth={2}
+              color={B.muted}
+              style={{ animation: refreshing ? "spin 1s linear infinite" : "none" }}
+            />
+          </button>
+
           <NotificationBell
             count={bellCount}
             isMobile={isMobile}
@@ -430,7 +464,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* SIDEBAR OVERLAY + BACKDROP */}
+      {/* SIDEBAR BACKDROP */}
       <div
         onClick={() => setOpen(false)}
         style={{
@@ -444,6 +478,7 @@ export default function App() {
         }}
       />
 
+      {/* SIDEBAR */}
       <aside style={{
         position: "fixed",
         top: 0,
