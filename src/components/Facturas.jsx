@@ -543,12 +543,12 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
   // ============================================================
   // KPIs (totales del listado filtrado)
   // ============================================================
-  const totalBase = facturasAll.reduce((s, f) => s + f.base, 0);
-  const totalNeto = facturasAll.reduce((s, f) => s + f.neto, 0);
-  const totalCobradas = facturasAll
+const totalBase = facturasProcesadas.reduce((s, f) => s + f.base, 0);
+const totalNeto = facturasProcesadas.reduce((s, f) => s + f.neto, 0);
+const totalCobradas = facturasProcesadas
     .filter(f => f.estado === "Cobrada")
     .reduce((s, f) => s + f.base, 0);
-  const totalPendientes = facturasAll
+const totalPendientes = facturasProcesadas
     .filter(f => f.estado === "Pendiente" || f.estado === "Vencida")
     .reduce((s, f) => s + f.base, 0);
 
