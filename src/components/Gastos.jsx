@@ -19,6 +19,9 @@ import {
 import { Card, Lbl, Inp, Sel, PageHeader, FilterBar, ErrorBox, Btn, IconPill } from "./UI.jsx";
 import NuevoForm from "./NuevoForm.jsx";
 
+// Modo demo: desactiva el botón de OCR + IA (la demo no tiene clave de OCR).
+const IS_DEMO = import.meta.env.VITE_DEMO_MODE === "true";
+
 // ============================================================
 // MENU ITEM
 // ============================================================
@@ -540,10 +543,17 @@ const [search, setSearch] = useState("");
             <Btn
               icon={Sparkles}
               iconBefore
-              onClick={() => setShowOCR(true)}
-              style={{ background: B.lavender, color: B.ink, border: `1px solid ${B.ink}` }}
+              onClick={() => { if (!IS_DEMO) setShowOCR(true); }}
+              disabled={IS_DEMO}
+              style={{
+                background: IS_DEMO ? B.border : B.lavender,
+                color: B.ink,
+                border: `1px solid ${IS_DEMO ? B.border : B.ink}`,
+                cursor: IS_DEMO ? "not-allowed" : "pointer",
+                opacity: IS_DEMO ? 0.55 : 1
+              }}
             >
-              OCR + IA
+              {IS_DEMO ? "OCR no disponible (demo)" : "OCR + IA"}
             </Btn>
             <Btn
               icon={showFManual ? X : Plus}
