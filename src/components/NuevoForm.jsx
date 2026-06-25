@@ -16,6 +16,9 @@ import {
 } from "../api.js";
 import { Card, Lbl, Inp, Sel, SectionHeader, ErrorBox } from "./UI.jsx";
 
+// Modo demo: si está activo, se desactiva el OCR (la demo no tiene clave de OCR).
+const IS_DEMO = import.meta.env.VITE_DEMO_MODE === "true";
+
 // ============================================================
 // CARGAR PDF.JS DINÁMICAMENTE
 // ============================================================
@@ -163,7 +166,7 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
   const [drag, setDrag] = useState(false);
   const [proc, setProc] = useState(false);
   const [procStep, setProcStep] = useState("");
-  const [mode, setMode] = useState("choose");
+  const [mode, setMode] = useState(IS_DEMO ? "manual" : "choose");
   const [res, setRes] = useState(null);
   const [tipo, setTipo] = useState(defaultTipo);
   const [sav, setSav] = useState(false);
@@ -452,16 +455,19 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
       {!saved && (
         <div style={{ display: "flex", gap: 8 }}>
           <button
-            onClick={() => { setMode("choose"); reset(); }}
+            onClick={() => { if (IS_DEMO) return; setMode("choose"); reset(); }}
+            disabled={IS_DEMO}
             style={{
               ...B.btnSm,
               flex: 1,
-              background: mode !== "manual" ? B.purple + "18" : "transparent",
-              border: `1px solid ${mode !== "manual" ? B.purple : B.border}`,
-              color: mode !== "manual" ? B.purple : B.text
+              background: (mode !== "manual" && !IS_DEMO) ? B.purple + "18" : "transparent",
+              border: `1px solid ${(mode !== "manual" && !IS_DEMO) ? B.purple : B.border}`,
+              color: IS_DEMO ? B.muted : (mode !== "manual" ? B.purple : B.text),
+              cursor: IS_DEMO ? "not-allowed" : "pointer",
+              opacity: IS_DEMO ? 0.55 : 1
             }}
           >
-            📷 ESCANEAR OCR
+            {IS_DEMO ? "📷 OCR no disponible en demo" : "📷 ESCANEAR OCR"}
           </button>
           <button
             onClick={() => { setMode("manual"); reset(); }}
@@ -478,7 +484,7 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
         </div>
       )}
 
-      {(mode === "choose" || mode === "ocr") && !res && !saved && (
+      {!IS_DEMO && (mode === "choose" || mode === "ocr") && !res && !saved && (
         <div
           onDragOver={e => { e.preventDefault(); setDrag(true); }}
           onDragLeave={() => setDrag(false)}
