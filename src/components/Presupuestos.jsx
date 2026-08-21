@@ -1,14 +1,15 @@
 // src/components/Presupuestos.jsx
-// CRM ligero de presupuestos: seguimiento de clientes potenciales.
+// CRM ligero: seguimiento de contactos y presupuestos de clientes potenciales.
 // Tabla Airtable: "Presupuestos"
-// Campos: Nombre, Proyecto, Email, Fecha contacto, Canal, Referido por,
+// Campos: Nombre, Proyecto, Email, Fecha contacto, Origen, Canal, Referido por,
 //         Presupuesto (URL), Importe, Estado, Próximo seguimiento, Notas
 
 import { useState, useMemo } from "react";
 import {
   Plus, X, Send, Trophy, XCircle, Clock, AlertCircle,
   ExternalLink, Trash2, CalendarClock, TrendingUp, Target,
-  Mail, Edit3, Check, Radio
+  Mail, Edit3, Check, Radio, MessageCircle, MinusCircle,
+  Inbox, ArrowUpRight, RotateCcw, Percent
 } from "lucide-react";
 
 import { B, fmt, hoy, diasEntre } from "../utils.js";
@@ -22,30 +23,39 @@ import {
 // CONSTANTES
 // ============================================================
 const CANALES = ["Instagram", "Pinterest", "Malt", "Web", "Referido", "Otro"];
-const ESTADOS = ["Pendiente", "Ganado", "Perdido"];
+const ORIGENES = ["Me contactan", "Contacto yo"];
+const ESTADOS = ["Contactado", "Presupuestado", "Ganado", "Perdido", "Sin respuesta"];
+
+// Fases todavía vivas: necesitan seguimiento
+const ABIERTOS = ["Contactado", "Presupuestado"];
+// Fases que llegaron a ver un precio
+const CON_PRECIO = ["Presupuestado", "Ganado", "Perdido"];
+// Fases ya resueltas en la primera etapa (base de la tasa de respuesta)
+const RESUELTOS_1A = ["Presupuestado", "Ganado", "Perdido", "Sin respuesta"];
+// Fases cerradas tras ver precio (base de la tasa de cierre)
+const CERRADOS = ["Ganado", "Perdido"];
 
 const FORM_VACIO = {
   nombre: "",
   proyecto: "",
   email: "",
   fechaContacto: hoy(),
+  origen: "Me contactan",
   canal: "",
   referidoPor: "",
   url: "",
   importe: "",
-  estado: "Pendiente",
+  estado: "Contactado",
   seguimiento: "",
   notas: ""
 };
 
-// Suma días a una fecha ISO y devuelve ISO
 function sumarDias(fechaISO, dias) {
   const d = fechaISO ? new Date(fechaISO) : new Date();
   d.setDate(d.getDate() + dias);
   return d.toISOString().split("T")[0];
 }
 
-// Fecha legible corta: 3 ago
 function fechaCorta(f) {
   if (!f) return "—";
   try {
@@ -55,16 +65,41 @@ function fechaCorta(f) {
   }
 }
 
+// Chip genérico blanco con borde
+function Chip({ icon: Icon, children }) {
+  return (
+    <span style={{
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 5,
+      background: "#fff",
+      border: `1px solid ${B.border}`,
+      borderRadius: 999,
+      padding: "4px 10px",
+      fontSize: 11,
+      fontWeight: 500,
+      fontFamily: B.font,
+      color: B.ink,
+      whiteSpace: "nowrap"
+    }}>
+      {Icon && <Icon size={11} strokeWidth={2} />}
+      {children}
+    </span>
+  );
+}
+
 // ============================================================
-// PILL DE ESTADO — paleta marca (amarillo / lavanda / apagado)
+// PILL DE ESTADO
 // ============================================================
 function EstadoPill({ estado }) {
   const map = {
-    Pendiente: { bg: B.yellow, fg: B.ink, icon: Clock, border: "transparent", op: 1 },
-    Ganado: { bg: B.lavender, fg: B.ink, icon: Trophy, border: "transparent", op: 1 },
-    Perdido: { bg: "transparent", fg: B.ink, icon: XCircle, border: B.border, op: 0.45 }
+    Contactado: { bg: "transparent", icon: MessageCircle, border: B.ink, op: 1 },
+    Presupuestado: { bg: B.yellow, icon: Send, border: "transparent", op: 1 },
+    Ganado: { bg: B.lavender, icon: Trophy, border: "transparent", op: 1 },
+    Perdido: { bg: "transparent", icon: XCircle, border: B.border, op: 0.45 },
+    "Sin respuesta": { bg: "transparent", icon: MinusCircle, border: B.border, op: 0.45 }
   };
-  const x = map[estado] || map.Pendiente;
+  const x = map[estado] || map.Contactado;
   const Icon = x.icon;
   return (
     <span style={{
@@ -72,7 +107,7 @@ function EstadoPill({ estado }) {
       alignItems: "center",
       gap: 5,
       background: x.bg,
-      color: x.fg,
+      color: B.ink,
       border: `1px solid ${x.border}`,
       padding: "4px 10px",
       borderRadius: 999,
@@ -89,7 +124,7 @@ function EstadoPill({ estado }) {
 }
 
 // ============================================================
-// PILL DE SEGUIMIENTO — negro si vencido, gris si futuro
+// PILL DE SEGUIMIENTO
 // ============================================================
 function SeguimientoPill({ fecha }) {
   if (!fecha) {
@@ -141,7 +176,7 @@ function SeguimientoPill({ fecha }) {
 }
 
 // ============================================================
-// PILL DE FILTRO — negro cuando está activo
+// PILL DE FILTRO
 // ============================================================
 function FiltroPill({ active, onClick, children }) {
   return (
@@ -192,7 +227,8 @@ function KPICard({ icon: Icon, label, value, hint, accent = null }) {
         color: B.ink,
         opacity: 0.55,
         marginTop: 4,
-        fontFamily: B.font
+        fontFamily: B.font,
+        lineHeight: 1.4
       }}>
         {hint}
       </div>
@@ -201,11 +237,11 @@ function KPICard({ icon: Icon, label, value, hint, accent = null }) {
 }
 
 // ============================================================
-// BARRA HORIZONTAL POR CANAL (sin librerías)
+// BARRA HORIZONTAL POR CANAL
 // ============================================================
-function BarraCanal({ canal, ganados, total, euros, maxEuros }) {
+function BarraCanal({ canal, ganados, cerrados, euros, maxEuros }) {
   const pct = maxEuros > 0 ? (euros / maxEuros) * 100 : 0;
-  const conv = total > 0 ? Math.round((ganados / total) * 100) : 0;
+  const conv = cerrados > 0 ? Math.round((ganados / cerrados) * 100) : 0;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <div style={{
@@ -218,7 +254,7 @@ function BarraCanal({ canal, ganados, total, euros, maxEuros }) {
       }}>
         <span style={{ fontWeight: 600, color: B.ink }}>{canal}</span>
         <span style={{ color: B.ink, opacity: 0.6, fontSize: 12, ...B.num }}>
-          {fmt(euros)} · {ganados}/{total} · {conv}%
+          {fmt(euros)} · {ganados}/{cerrados} · {conv}%
         </span>
       </div>
       <div style={{
@@ -240,13 +276,11 @@ function BarraCanal({ canal, ganados, total, euros, maxEuros }) {
 }
 
 // ============================================================
-// FILA DE PRESUPUESTO
+// FICHA DE CONTACTO
 // ============================================================
-function FilaPresupuesto({
-  p, isMobile, busy,
-  onEstado, onPosponer, onEditar, onBorrar
-}) {
-  const vencido = p.estado === "Pendiente" && p.seguimiento && diasEntre(hoy(), p.seguimiento) <= 0;
+function Ficha({ p, isMobile, busy, onEstado, onPosponer, onEditar, onBorrar }) {
+  const abierto = ABIERTOS.includes(p.estado);
+  const vencido = abierto && p.seguimiento && diasEntre(hoy(), p.seguimiento) <= 0;
 
   return (
     <div style={{
@@ -261,7 +295,7 @@ function FilaPresupuesto({
       opacity: busy ? 0.5 : 1,
       transition: "opacity 0.15s ease"
     }}>
-      {/* LÍNEA 1: nombre + proyecto + importe */}
+      {/* CABECERA */}
       <div style={{
         display: "flex",
         justifyContent: "space-between",
@@ -297,54 +331,31 @@ function FilaPresupuesto({
           fontFamily: B.font,
           color: B.ink,
           letterSpacing: "-0.015em",
+          opacity: p.importe > 0 ? 1 : 0.3,
           ...B.num
         }}>
-          {p.importe > 0 ? fmt(p.importe) : "—"}
+          {p.importe > 0 ? fmt(p.importe) : "sin precio"}
         </div>
       </div>
 
-      {/* LÍNEA 2: chips */}
+      {/* CHIPS */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
         <EstadoPill estado={p.estado} />
-        {p.estado === "Pendiente" && <SeguimientoPill fecha={p.seguimiento} />}
-        {p.canal && (
-          <span style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 5,
-            background: "#fff",
-            border: `1px solid ${B.border}`,
-            borderRadius: 999,
-            padding: "4px 10px",
-            fontSize: 11,
-            fontWeight: 500,
-            fontFamily: B.font,
-            color: B.ink
-          }}>
-            <Radio size={11} strokeWidth={2} />
-            {p.canal}{p.referidoPor ? ` · ${p.referidoPor}` : ""}
-          </span>
+        {abierto && <SeguimientoPill fecha={p.seguimiento} />}
+        {p.origen && (
+          <Chip icon={p.origen === "Me contactan" ? Inbox : ArrowUpRight}>
+            {p.origen}
+          </Chip>
         )}
-        <span style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 5,
-          background: "#fff",
-          border: `1px solid ${B.border}`,
-          borderRadius: 999,
-          padding: "4px 10px",
-          fontSize: 11,
-          fontWeight: 500,
-          fontFamily: B.font,
-          color: B.ink,
-          ...B.num
-        }}>
-          <Send size={11} strokeWidth={2} />
-          {fechaCorta(p.fechaContacto)}
-        </span>
+        {p.canal && (
+          <Chip icon={Radio}>
+            {p.canal}{p.referidoPor ? ` · ${p.referidoPor}` : ""}
+          </Chip>
+        )}
+        <Chip icon={Send}>{fechaCorta(p.fechaContacto)}</Chip>
       </div>
 
-      {/* LÍNEA 3: enlaces */}
+      {/* ENLACES */}
       {(p.url || p.email) && (
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
           {p.url && (
@@ -406,36 +417,55 @@ function FilaPresupuesto({
         </div>
       )}
 
-      {/* ACCIONES */}
+      {/* ACCIONES — contextuales según la fase */}
       <div style={{
         display: "flex",
         gap: 6,
         flexWrap: "wrap",
+        alignItems: "center",
         borderTop: `1px solid ${B.border}`,
         paddingTop: 12
       }}>
-        {p.estado === "Pendiente" && (
+        {p.estado === "Contactado" && (
           <>
-            <Btn size="sm" icon={Trophy} iconBefore disabled={busy}
-              onClick={() => onEstado(p.id, "Ganado")}>
-              Ganado
+            <Btn size="sm" variant="outline" icon={Send} iconBefore disabled={busy}
+              onClick={() => onEstado(p.id, "Presupuestado")}>
+              Presupuesto enviado
             </Btn>
-            <Btn size="sm" variant="outline" icon={XCircle} iconBefore disabled={busy}
-              onClick={() => onEstado(p.id, "Perdido")}>
-              Perdido
-            </Btn>
-            <Btn size="sm" variant="outline" icon={CalendarClock} iconBefore disabled={busy}
-              onClick={() => onPosponer(p.id, 7)}>
-              +7 días
+            <Btn size="sm" variant="outline" icon={MinusCircle} iconBefore disabled={busy}
+              onClick={() => onEstado(p.id, "Sin respuesta")}>
+              Sin respuesta
             </Btn>
           </>
         )}
-        {p.estado !== "Pendiente" && (
-          <Btn size="sm" variant="outline" icon={Clock} iconBefore disabled={busy}
-            onClick={() => onEstado(p.id, "Pendiente")}>
+
+        {p.estado === "Presupuestado" && (
+          <>
+            <Btn size="sm" variant="outline" icon={Trophy} iconBefore disabled={busy}
+              onClick={() => onEstado(p.id, "Ganado")}>
+              Marcar ganado
+            </Btn>
+            <Btn size="sm" variant="outline" icon={XCircle} iconBefore disabled={busy}
+              onClick={() => onEstado(p.id, "Perdido")}>
+              Marcar perdido
+            </Btn>
+          </>
+        )}
+
+        {ABIERTOS.includes(p.estado) && (
+          <Btn size="sm" variant="outline" icon={CalendarClock} iconBefore disabled={busy}
+            onClick={() => onPosponer(p.id, 7)}>
+            +7 días
+          </Btn>
+        )}
+
+        {!ABIERTOS.includes(p.estado) && (
+          <Btn size="sm" variant="outline" icon={RotateCcw} iconBefore disabled={busy}
+            onClick={() => onEstado(p.id, p.importe > 0 ? "Presupuestado" : "Contactado")}>
             Reabrir
           </Btn>
         )}
+
         <Btn size="sm" variant="ghost" icon={Edit3} iconBefore disabled={busy}
           onClick={() => onEditar(p)}>
           Editar
@@ -462,12 +492,13 @@ export default function Presupuestos({ presupuestos, onRefresh }) {
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [err, setErr] = useState("");
-  const [filtroEstado, setFiltroEstado] = useState("Pendiente");
+  const [filtro, setFiltro] = useState("abiertos");
+  const [origenGrafico, setOrigenGrafico] = useState("Todos");
 
   const setF = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
 
   // ============================================================
-  // NORMALIZAR REGISTROS
+  // NORMALIZAR
   // ============================================================
   const datos = useMemo(() => (presupuestos || []).map(r => ({
     id: r.id,
@@ -475,81 +506,106 @@ export default function Presupuestos({ presupuestos, onRefresh }) {
     proyecto: r.fields["Proyecto"] || "",
     email: r.fields["Email"] || "",
     fechaContacto: r.fields["Fecha contacto"] || "",
+    origen: r.fields["Origen"] || "",
     canal: r.fields["Canal"] || "",
     referidoPor: r.fields["Referido por"] || "",
     url: r.fields["Presupuesto"] || "",
     importe: r.fields["Importe"] || 0,
-    estado: r.fields["Estado"] || "Pendiente",
+    estado: r.fields["Estado"] || "Contactado",
     seguimiento: r.fields["Próximo seguimiento"] || "",
     notas: r.fields["Notas"] || ""
   })), [presupuestos]);
 
   // ============================================================
-  // KPIs (sobre TODO, no sobre el filtro)
+  // KPIs
   // ============================================================
   const kpis = useMemo(() => {
-    const pendientes = datos.filter(p => p.estado === "Pendiente");
+    const abiertos = datos.filter(p => ABIERTOS.includes(p.estado));
     const ganados = datos.filter(p => p.estado === "Ganado");
-    const perdidos = datos.filter(p => p.estado === "Perdido");
-    const cerrados = ganados.length + perdidos.length;
+    const cerrados = datos.filter(p => CERRADOS.includes(p.estado));
 
-    const enJuego = pendientes.reduce((s, p) => s + p.importe, 0);
+    const enJuego = abiertos.reduce((s, p) => s + p.importe, 0);
     const eurosGanados = ganados.reduce((s, p) => s + p.importe, 0);
-    const conversion = cerrados > 0 ? Math.round((ganados.length / cerrados) * 100) : 0;
 
-    const aSeguir = pendientes.filter(p =>
+    // Tasa de cierre: de los que vieron precio y se resolvieron
+    const cierre = cerrados.length > 0
+      ? Math.round((ganados.length / cerrados.length) * 100)
+      : 0;
+
+    // Tasa de respuesta: SOLO sobre los que contacta ella
+    const salientes = datos.filter(p => p.origen === "Contacto yo");
+    const salResueltos = salientes.filter(p => RESUELTOS_1A.includes(p.estado));
+    const salRespondieron = salientes.filter(p => CON_PRECIO.includes(p.estado));
+    const respuesta = salResueltos.length > 0
+      ? Math.round((salRespondieron.length / salResueltos.length) * 100)
+      : 0;
+
+    const aSeguir = abiertos.filter(p =>
       p.seguimiento && diasEntre(hoy(), p.seguimiento) <= 0
     ).length;
 
     return {
-      pendientes: pendientes.length,
+      abiertos: abiertos.length,
       enJuego,
       eurosGanados,
       ganados: ganados.length,
-      cerrados,
-      conversion,
+      cerrados: cerrados.length,
+      cierre,
+      respuesta,
+      salResueltos: salResueltos.length,
+      salRespondieron: salRespondieron.length,
       aSeguir
     };
   }, [datos]);
 
   // ============================================================
-  // DATOS POR CANAL
+  // GRÁFICO POR CANAL (filtrable por origen)
   // ============================================================
   const porCanal = useMemo(() => {
+    const base = origenGrafico === "Todos"
+      ? datos
+      : datos.filter(p => p.origen === origenGrafico);
+
     const filas = CANALES.map(c => {
-      const delCanal = datos.filter(p => p.canal === c);
+      const delCanal = base.filter(p => p.canal === c);
       const gan = delCanal.filter(p => p.estado === "Ganado");
-      const cerrados = delCanal.filter(p => p.estado !== "Pendiente").length;
+      const cer = delCanal.filter(p => CERRADOS.includes(p.estado));
       return {
         canal: c,
-        total: cerrados,
         ganados: gan.length,
-        euros: gan.reduce((s, p) => s + p.importe, 0)
+        cerrados: cer.length,
+        euros: gan.reduce((s, p) => s + p.importe, 0),
+        total: delCanal.length
       };
-    }).filter(f => f.total > 0 || f.euros > 0);
+    }).filter(f => f.total > 0);
+
     const maxEuros = Math.max(1, ...filas.map(f => f.euros));
     return { filas, maxEuros };
-  }, [datos]);
+  }, [datos, origenGrafico]);
 
   // ============================================================
-  // LISTA FILTRADA Y ORDENADA
+  // LISTA FILTRADA
   // ============================================================
   const lista = useMemo(() => {
-    let l = filtroEstado === "Todos"
-      ? datos
-      : datos.filter(p => p.estado === filtroEstado);
+    let l = datos;
+    if (filtro === "abiertos") l = datos.filter(p => ABIERTOS.includes(p.estado));
+    else if (filtro === "ganados") l = datos.filter(p => p.estado === "Ganado");
+    else if (filtro === "descartados")
+      l = datos.filter(p => p.estado === "Perdido" || p.estado === "Sin respuesta");
 
     return [...l].sort((a, b) => {
-      // Pendientes: por fecha de seguimiento (los que tocan antes, arriba)
-      if (a.estado === "Pendiente" && b.estado === "Pendiente") {
+      const aAb = ABIERTOS.includes(a.estado);
+      const bAb = ABIERTOS.includes(b.estado);
+      if (aAb && bAb) {
         if (!a.seguimiento) return 1;
         if (!b.seguimiento) return -1;
         return a.seguimiento.localeCompare(b.seguimiento);
       }
-      // Resto: por fecha de contacto descendente
+      if (aAb) return -1;
+      if (bAb) return 1;
       return (b.fechaContacto || "").localeCompare(a.fechaContacto || "");
     });
-  }, [datos, filtroEstado]);
+  }, [datos, filtro]);
 
   // ============================================================
   // ACCIONES
@@ -567,6 +623,7 @@ export default function Presupuestos({ presupuestos, onRefresh }) {
       proyecto: p.proyecto,
       email: p.email,
       fechaContacto: p.fechaContacto,
+      origen: p.origen || "Me contactan",
       canal: p.canal,
       referidoPor: p.referidoPor,
       url: p.url,
@@ -590,7 +647,7 @@ export default function Presupuestos({ presupuestos, onRefresh }) {
 
   const guardar = async () => {
     if (!form.nombre.trim()) {
-      setErr("El nombre del cliente es obligatorio.");
+      setErr("El nombre del contacto es obligatorio.");
       return;
     }
     setSaving(true);
@@ -600,20 +657,16 @@ export default function Presupuestos({ presupuestos, onRefresh }) {
         "Nombre": form.nombre.trim(),
         "Proyecto": form.proyecto.trim(),
         "Email": form.email.trim(),
-        "Canal": form.canal || undefined,
         "Referido por": form.referidoPor.trim(),
         "Presupuesto": form.url.trim(),
         "Importe": Number(form.importe) || 0,
-        "Estado": form.estado || "Pendiente",
+        "Estado": form.estado || "Contactado",
         "Notas": form.notas
       };
+      if (form.canal) fields["Canal"] = form.canal;
+      if (form.origen) fields["Origen"] = form.origen;
       if (form.fechaContacto) fields["Fecha contacto"] = form.fechaContacto;
       if (form.seguimiento) fields["Próximo seguimiento"] = form.seguimiento;
-
-      // Airtable rechaza undefined en single select: lo quitamos
-      Object.keys(fields).forEach(k => {
-        if (fields[k] === undefined) delete fields[k];
-      });
 
       if (editId) {
         await updateRecord("Presupuestos", editId, fields);
@@ -633,9 +686,11 @@ export default function Presupuestos({ presupuestos, onRefresh }) {
     setErr("");
     try {
       const fields = { "Estado": nuevo };
-      // Al cerrar, el seguimiento deja de tener sentido
-      if (nuevo !== "Pendiente") fields["Próximo seguimiento"] = null;
-      else fields["Próximo seguimiento"] = sumarDias(hoy(), 7);
+      if (ABIERTOS.includes(nuevo)) {
+        fields["Próximo seguimiento"] = sumarDias(hoy(), 7);
+      } else {
+        fields["Próximo seguimiento"] = null;
+      }
       await updateRecord("Presupuestos", id, fields);
       await onRefresh();
     } catch (e) {
@@ -659,7 +714,7 @@ export default function Presupuestos({ presupuestos, onRefresh }) {
   };
 
   const borrar = async (id, nombre) => {
-    if (!confirm(`¿Borrar el presupuesto de "${nombre}"? No se puede deshacer.`)) return;
+    if (!confirm(`¿Borrar el registro de "${nombre}"? No se puede deshacer.`)) return;
     setBusyId(id);
     setErr("");
     try {
@@ -671,6 +726,8 @@ export default function Presupuestos({ presupuestos, onRefresh }) {
     setBusyId(null);
   };
 
+  const pocoDato = kpis.cerrados < 6;
+
   // ============================================================
   // RENDER
   // ============================================================
@@ -678,7 +735,7 @@ export default function Presupuestos({ presupuestos, onRefresh }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
       <PageHeader
         title="Presupuestos."
-        subtitle="A quién le has pasado precio, a quién toca perseguir y qué canal te trae trabajo."
+        subtitle="A quién has contactado, a quién le has pasado precio y a quién toca perseguir."
         action={
           <Btn
             onClick={() => (showForm ? cerrarForm() : abrirNuevo())}
@@ -686,17 +743,17 @@ export default function Presupuestos({ presupuestos, onRefresh }) {
             iconBefore
             variant={showForm ? "outline" : "primary"}
           >
-            {showForm ? "Cancelar" : "Nuevo presupuesto"}
+            {showForm ? "Cancelar" : "Nuevo contacto"}
           </Btn>
         }
       />
 
       {err && <ErrorBox>{err}</ErrorBox>}
 
-      {/* ======================= KPIs ======================= */}
+      {/* KPIs */}
       <div style={{
         display: "grid",
-        gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(200px, 1fr))",
+        gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(190px, 1fr))",
         gap: 14
       }}>
         <KPICard
@@ -708,31 +765,39 @@ export default function Presupuestos({ presupuestos, onRefresh }) {
         />
         <KPICard
           icon={Clock}
-          label="Abiertos"
-          value={kpis.pendientes}
+          label="Vivos"
+          value={kpis.abiertos}
           hint={`${fmt(kpis.enJuego)} en juego`}
         />
         <KPICard
           icon={Trophy}
           label="Ganado"
           value={fmt(kpis.eurosGanados)}
-          hint={`${kpis.ganados} presupuesto${kpis.ganados === 1 ? "" : "s"}`}
+          hint={`${kpis.ganados} proyecto${kpis.ganados === 1 ? "" : "s"}`}
+        />
+        <KPICard
+          icon={Percent}
+          label="Respuesta"
+          value={kpis.salResueltos === 0 ? "—" : `${kpis.respuesta}%`}
+          hint={kpis.salResueltos === 0
+            ? "Cuando prospectes tú"
+            : `${kpis.salRespondieron} de ${kpis.salResueltos} que contactaste`}
         />
         <KPICard
           icon={Target}
-          label="Conversión"
-          value={`${kpis.conversion}%`}
-          hint={kpis.cerrados < 6
-            ? `Solo ${kpis.cerrados} cerrado${kpis.cerrados === 1 ? "" : "s"}: aún no es fiable`
-            : `${kpis.ganados} de ${kpis.cerrados} cerrados`}
+          label="Cierre"
+          value={kpis.cerrados === 0 ? "—" : `${kpis.cierre}%`}
+          hint={kpis.cerrados === 0
+            ? "Sin presupuestos cerrados"
+            : `${kpis.ganados} de ${kpis.cerrados} con precio`}
         />
       </div>
 
-      {/* ======================= FORMULARIO ======================= */}
+      {/* FORMULARIO */}
       {showForm && (
         <Card>
           <div style={{ marginBottom: 18 }}>
-            <Lbl>{editId ? "Editar presupuesto" : "Nuevo presupuesto"}</Lbl>
+            <Lbl>{editId ? "Editar contacto" : "Nuevo contacto"}</Lbl>
           </div>
 
           <div style={{
@@ -744,22 +809,24 @@ export default function Presupuestos({ presupuestos, onRefresh }) {
               onChange={v => setF("nombre", v)} ph="Pepita Pérez" />
             <Inp label="Proyecto" value={form.proyecto}
               onChange={v => setF("proyecto", v)} ph="Estudio de cerámica" />
-            <Inp label="Email" type="email" value={form.email}
-              onChange={v => setF("email", v)} ph="hola@ejemplo.com" />
-            <Inp label="Fecha de contacto" type="date" value={form.fechaContacto}
-              onChange={v => setF("fechaContacto", v)} />
+            <Sel label="Origen" value={form.origen}
+              onChange={v => setF("origen", v)} options={ORIGENES} />
             <Sel label="Canal" value={form.canal}
               onChange={v => setF("canal", v)} options={CANALES} />
             {form.canal === "Referido" && (
               <Inp label="Referido por" value={form.referidoPor}
                 onChange={v => setF("referidoPor", v)} ph="Quién te lo pasó" />
             )}
-            <Inp label="Importe (base, sin IVA)" type="number" value={form.importe}
-              onChange={v => setF("importe", v)} ph="1200" />
+            <Inp label="Email" type="email" value={form.email}
+              onChange={v => setF("email", v)} ph="hola@ejemplo.com" />
+            <Inp label="Fecha de contacto" type="date" value={form.fechaContacto}
+              onChange={v => setF("fechaContacto", v)} />
             <Sel label="Estado" value={form.estado}
-              onChange={v => setF("estado", v)} options={ESTADOS} placeholder="Pendiente" />
+              onChange={v => setF("estado", v)} options={ESTADOS} placeholder="Contactado" />
             <Inp label="Próximo seguimiento" type="date" value={form.seguimiento}
               onChange={v => setF("seguimiento", v)} />
+            <Inp label="Importe (base, sin IVA)" type="number" value={form.importe}
+              onChange={v => setF("importe", v)} ph="Déjalo vacío si aún no hay precio" />
             <Inp label="Enlace al PDF" value={form.url}
               onChange={v => setF("url", v)} ph="https://drive.google.com/…" />
           </div>
@@ -772,7 +839,7 @@ export default function Presupuestos({ presupuestos, onRefresh }) {
 
           <div style={{ display: "flex", gap: 8, marginTop: 18, flexWrap: "wrap" }}>
             <Btn onClick={guardar} disabled={saving} icon={Check} iconBefore>
-              {saving ? "Guardando…" : editId ? "Guardar cambios" : "Crear presupuesto"}
+              {saving ? "Guardando…" : editId ? "Guardar cambios" : "Crear contacto"}
             </Btn>
             <Btn variant="outline" onClick={cerrarForm} disabled={saving}>
               Cancelar
@@ -781,13 +848,34 @@ export default function Presupuestos({ presupuestos, onRefresh }) {
         </Card>
       )}
 
-      {/* ======================= GRÁFICO POR CANAL ======================= */}
+      {/* GRÁFICO POR CANAL */}
       {porCanal.filas.length > 0 && (
         <Card>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-            <IconPill icon={TrendingUp} size={28} />
-            <Lbl>Qué canal te trae dinero</Lbl>
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+            marginBottom: 6
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <IconPill icon={TrendingUp} size={28} />
+              <Lbl>Qué canal te trae dinero</Lbl>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {["Todos", ...ORIGENES].map(o => (
+                <FiltroPill
+                  key={o}
+                  active={origenGrafico === o}
+                  onClick={() => setOrigenGrafico(o)}
+                >
+                  {o}
+                </FiltroPill>
+              ))}
+            </div>
           </div>
+
           <div style={{
             fontSize: 12,
             fontFamily: B.font,
@@ -795,21 +883,23 @@ export default function Presupuestos({ presupuestos, onRefresh }) {
             opacity: 0.55,
             marginBottom: 18
           }}>
-            Euros ganados · ganados/cerrados · tasa de conversión
+            Euros ganados · ganados/cerrados · tasa de cierre
           </div>
+
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {porCanal.filas.map(f => (
               <BarraCanal
                 key={f.canal}
                 canal={f.canal}
                 ganados={f.ganados}
-                total={f.total}
+                cerrados={f.cerrados}
                 euros={f.euros}
                 maxEuros={porCanal.maxEuros}
               />
             ))}
           </div>
-          {kpis.cerrados < 6 && (
+
+          {pocoDato && (
             <div style={{
               marginTop: 18,
               paddingTop: 14,
@@ -820,25 +910,27 @@ export default function Presupuestos({ presupuestos, onRefresh }) {
               opacity: 0.55,
               lineHeight: 1.5
             }}>
-              Con {kpis.cerrados} presupuesto{kpis.cerrados === 1 ? "" : "s"} cerrado{kpis.cerrados === 1 ? "" : "s"} estos
+              Con {kpis.cerrados} presupuesto{kpis.cerrados === 1 ? "" : "s"} cerrado{kpis.cerrados === 1 ? "" : "s"}, estos
               porcentajes todavía son ruido. Empiezan a significar algo a partir de seis u ocho por canal.
             </div>
           )}
         </Card>
       )}
 
-      {/* ======================= FILTRO ======================= */}
+      {/* FILTROS */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        {["Pendiente", "Ganado", "Perdido", "Todos"].map(e => (
+        {[
+          ["abiertos", "Vivos"],
+          ["ganados", "Ganados"],
+          ["descartados", "Descartados"],
+          ["todos", "Todos"]
+        ].map(([id, label]) => (
           <FiltroPill
-            key={e}
-            active={filtroEstado === e}
-            onClick={() => setFiltroEstado(e)}
+            key={id}
+            active={filtro === id}
+            onClick={() => setFiltro(id)}
           >
-            {e === "Pendiente" ? "Abiertos"
-              : e === "Ganado" ? "Ganados"
-              : e === "Perdido" ? "Perdidos"
-              : "Todos"}
+            {label}
           </FiltroPill>
         ))}
         <span style={{
@@ -853,14 +945,10 @@ export default function Presupuestos({ presupuestos, onRefresh }) {
         </span>
       </div>
 
-      {/* ======================= LISTA ======================= */}
+      {/* LISTA */}
       {lista.length === 0 ? (
         <Card>
-          <div style={{
-            textAlign: "center",
-            padding: "28px 12px",
-            fontFamily: B.font
-          }}>
+          <div style={{ textAlign: "center", padding: "28px 12px", fontFamily: B.font }}>
             <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
               <IconPill icon={Send} size={40} />
             </div>
@@ -872,10 +960,11 @@ export default function Presupuestos({ presupuestos, onRefresh }) {
               color: B.ink,
               opacity: 0.55,
               marginTop: 6,
-              maxWidth: 380,
-              margin: "6px auto 0"
+              maxWidth: 400,
+              margin: "6px auto 0",
+              lineHeight: 1.5
             }}>
-              Cada vez que mandes un presupuesto, apúntalo aquí con fecha de seguimiento.
+              Apunta aquí a todo el que contactes o te contacte, con fecha de seguimiento.
               Es lo que evita que se te escapen.
             </div>
           </div>
@@ -883,7 +972,7 @@ export default function Presupuestos({ presupuestos, onRefresh }) {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {lista.map(p => (
-            <FilaPresupuesto
+            <Ficha
               key={p.id}
               p={p}
               isMobile={isMobile}
