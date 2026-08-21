@@ -7,7 +7,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Menu, X, Calendar, LogOut, Bell as BellIcon,
   LayoutDashboard, FileText, Users, Receipt, Repeat,
-  Bell, Calculator, ShieldCheck, RefreshCw
+  Bell, Calculator, ShieldCheck, RefreshCw, Send
 } from "lucide-react";
 
 import { B, MENU } from "./utils.js";
@@ -23,6 +23,7 @@ import AlertPopup from "./components/AlertPopup.jsx";
 import Dashboard from "./components/Dashboard.jsx";
 import FacturasView from "./components/Facturas.jsx";
 import Clientes from "./components/Clientes.jsx";
+import Presupuestos from "./components/Presupuestos.jsx";
 import GastosView from "./components/Gastos.jsx";
 import GastosFijos from "./components/GastosFijos.jsx";
 import Simulador from "./components/Simulador.jsx";
@@ -41,6 +42,7 @@ const MENU_ICONS = {
   LayoutDashboard,
   FileText,
   Users,
+  Send,
   Receipt,
   Repeat,
   Bell,
@@ -141,6 +143,7 @@ export default function App() {
   const [gastos, setG] = useState([]);
   const [gastosFijos, setGF] = useState([]);
   const [clientes, setC] = useState([]);
+  const [presupuestos, setP] = useState([]);
   const [tramos, setT] = useState([]);
   const [alertas, setA] = useState([]);
 
@@ -173,15 +176,16 @@ export default function App() {
     else setRefreshing(true);
     setLoadError("");
     try {
-      const [i, g, c, t, a, gf] = await Promise.all([
+      const [i, g, c, t, a, gf, p] = await Promise.all([
         fetchTable("Ingresos"),
         fetchTable("Gastos"),
         fetchTable("Clientes"),
         fetchTable("Tramos de Cotización"),
         fetchTable("Alertas").catch(() => []),
-        fetchTable("Gastos Fijos").catch(() => [])
+        fetchTable("Gastos Fijos").catch(() => []),
+        fetchTable("Presupuestos").catch(() => [])
       ]);
-      setI(i); setG(g); setC(c); setT(t); setA(a); setGF(gf);
+      setI(i); setG(g); setC(c); setT(t); setA(a); setGF(gf); setP(p);
     } catch (e) {
       console.error("Error cargando datos:", e);
       setLoadError(e.message || "Error cargando datos");
@@ -298,6 +302,8 @@ export default function App() {
         );
       case "clientes":
         return <Clientes clientes={clientes} ingresos={ingresos} onRefresh={load} />;
+      case "presupuestos":
+        return <Presupuestos presupuestos={presupuestos} onRefresh={load} />;
       case "gastos":
         return (
           <GastosView
