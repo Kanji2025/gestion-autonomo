@@ -205,6 +205,7 @@ export const MENU = [
   { id: "dashboard", label: "Resumen", iconName: "LayoutDashboard" },
   { id: "facturas", label: "Facturas", iconName: "FileText" },
   { id: "clientes", label: "Clientes", iconName: "Users" },
+  { id: "presupuestos", label: "Presupuestos", iconName: "Send" },
   { id: "gastos", label: "Gastos", iconName: "Receipt" },
   { id: "gastosfijos", label: "Gastos fijos", iconName: "Repeat" },
   { id: "alertas", label: "Alertas", iconName: "Bell" },
