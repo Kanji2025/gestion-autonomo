@@ -206,6 +206,7 @@ export const MENU = [
   { id: "facturas", label: "Facturas", iconName: "FileText" },
   { id: "clientes", label: "Clientes", iconName: "Users" },
   { id: "presupuestos", label: "Presupuestos", iconName: "Send" },
+  { id: "proyectos", label: "Proyectos", iconName: "Briefcase" },
   { id: "gastos", label: "Gastos", iconName: "Receipt" },
   { id: "gastosfijos", label: "Gastos fijos", iconName: "Repeat" },
   { id: "alertas", label: "Alertas", iconName: "Bell" },
