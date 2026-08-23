@@ -145,7 +145,6 @@ export default function Dashboard({
   const tGast = fg.reduce((s, r) => s + (r.fields["Base Imponible"] || 0), 0);
   const irpfClientes = fi.reduce((s, r) => s + (r.fields["IRPF (€)"] || 0), 0);
   const benef = tFact - irpfClientes - tGast;
-  const hucha = ivaR - ivaS + irpfRet;
   const venc = fi.filter(r => r.fields["Estado"] === "Vencida").length;
   const eficiencia = tFact > 0 ? Math.round((tCob / tFact) * 100) : 0;
 
@@ -153,7 +152,52 @@ export default function Dashboard({
     new Set(fi.map(r => r.fields["Fecha"] ? new Date(r.fields["Fecha"]).getMonth() : -1).filter(m => m >= 0)).size,
     1
   );
+  // Salario medio: beneficio neto repartido entre los meses con actividad
   const bMes = benef / mT;
+
+  // ============================================================
+  // HUCHA DE HACIENDA — siempre sobre un trimestre concreto.
+  // Si el filtro ya acota (trimestre o mes), se respeta.
+  // Si es un año entero, se usa el trimestre en curso: sumar los
+  // cuatro trimestres no tiene sentido porque ya has liquidado los cerrados.
+  // ============================================================
+  const triEnCurso = "Q" + (Math.floor(new Date().getMonth() / 3) + 1);
+  const filtroAmplio = !filtro.tri && (filtro.mes === "" || filtro.mes === undefined || filtro.mes === null);
+  const filtroHucha = filtroAmplio ? { ...filtro, tri: triEnCurso } : filtro;
+
+  const fiH = applyF(ingresos, filtroHucha);
+  const fgH = applyF(gastos, filtroHucha);
+  const ivaRH = fiH.reduce((s, r) => s + (r.fields["IVA (€)"] || 0), 0);
+  const ivaSH = fgH.reduce((s, r) => s + (r.fields["IVA Soportado (€)"] || 0), 0);
+  const irpfRetH = fgH.reduce((s, r) => s + (r.fields["IRPF Retenido (€)"] || 0), 0);
+  const huchaP = ivaRH - ivaSH + irpfRetH;
+
+  const etiquetaHucha = filtro.mes !== "" && filtro.mes !== undefined && filtro.mes !== null
+    ? MESES[Number(filtro.mes)]
+    : (filtroHucha.tri || "").replace("Q", "T") + (filtro.year ? ` ${filtro.year}` : "");
+
+  // ============================================================
+  // SALARIO DEL MES — beneficio real de un mes, no la media.
+  // Mes de referencia: el filtrado, o el último con actividad.
+  // ============================================================
+  const mesesActivos = [...new Set(
+    fi.map(r => r.fields["Fecha"] ? new Date(r.fields["Fecha"]).getMonth() : -1)
+      .filter(m => m >= 0)
+  )].sort((a, b) => a - b);
+
+  const mesSal = (filtro.mes !== "" && filtro.mes !== undefined && filtro.mes !== null)
+    ? Number(filtro.mes)
+    : (mesesActivos.length > 0 ? mesesActivos[mesesActivos.length - 1] : new Date().getMonth());
+
+  const delMes = (recs) => recs.filter(r => {
+    const d = r.fields["Fecha"];
+    return d && new Date(d).getMonth() === mesSal;
+  });
+
+  const factMes = delMes(fi).reduce((s, r) => s + (r.fields["Base Imponible"] || 0), 0);
+  const irpfMes = delMes(fi).reduce((s, r) => s + (r.fields["IRPF (€)"] || 0), 0);
+  const gastMes = delMes(fg).reduce((s, r) => s + (r.fields["Base Imponible"] || 0), 0);
+  const benefMes = factMes - irpfMes - gastMes;
 
   // Próximo cierre IVA
   const proxIVA = nextIVAClosingDate();
@@ -175,9 +219,9 @@ export default function Dashboard({
   // Edición salario
   const [editS, setEditS] = useState(false);
   const [tmpS, setTmpS] = useState(salObj);
-  const reached = bMes >= salObj;
-  const remaining = Math.max(salObj - bMes, 0);
-  const pctSal = Math.min(Math.max((bMes / (salObj || 1)) * 100, 0), 100);
+  const reached = benefMes >= salObj;
+  const remaining = Math.max(salObj - benefMes, 0);
+  const pctSal = Math.min(Math.max((benefMes / (salObj || 1)) * 100, 0), 100);
 
   const saveSal = () => {
     setSalObj(Number(tmpS) || 0);
@@ -237,7 +281,7 @@ export default function Dashboard({
           icon={benef >= 0 ? TrendingUp : TrendingDown}
           label="Beneficio neto"
           value={fmt(benef)}
-          sub={`${fmt(bMes)} de media al mes`}
+          sub={`${fmt(bMes)}/mes de media`}
         />
         <KPICard
           icon={Clock}
@@ -249,7 +293,7 @@ export default function Dashboard({
 
       {/* HUCHA DE HACIENDA — lavanda con borde negro */}
       <Card accent="lavender" style={{ overflow: "hidden", position: "relative" }}>
-     <Lbl>Hucha de Hacienda · Dinero intocable</Lbl>
+        <Lbl>Hucha de Hacienda · {etiquetaHucha}</Lbl>
         <div style={{
           fontSize: B.ty.display,
           fontWeight: 700,
@@ -260,7 +304,7 @@ export default function Dashboard({
           color: B.ink,
           ...B.num
         }}>
-          {fmt(hucha)}
+          {fmt(huchaP)}
         </div>
         <p style={{
           fontSize: B.ty.small,
@@ -271,6 +315,7 @@ export default function Dashboard({
           maxWidth: 480
         }}>
           Apártalo en otra cuenta antes del próximo cierre. Este dinero no es tuyo.
+          {filtroAmplio && " Se calcula sobre el trimestre en curso, no sobre todo el año: los trimestres cerrados ya los has liquidado."}
         </p>
 
         <div style={{
@@ -283,9 +328,9 @@ export default function Dashboard({
           position: "relative",
           zIndex: 1
         }}>
-          <BreakdownItem label="IVA repercutido" value={ivaR} sign="+" />
-          <BreakdownItem label="IVA soportado" value={ivaS} sign="−" />
-          <BreakdownItem label="IRPF retenido" value={irpfRet} sign="+" />
+          <BreakdownItem label="IVA repercutido" value={ivaRH} sign="+" />
+          <BreakdownItem label="IVA soportado" value={ivaSH} sign="−" />
+          <BreakdownItem label="IRPF retenido" value={irpfRetH} sign="+" />
         </div>
       </Card>
 
@@ -424,7 +469,7 @@ export default function Dashboard({
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
               <IconPill icon={Target} size={28} />
-              <Lbl>Tu salario este mes</Lbl>
+              <Lbl>Tu salario en {MESES[mesSal]}</Lbl>
             </div>
             <h2 style={{
               fontSize: B.ty.h2,
@@ -443,7 +488,7 @@ export default function Dashboard({
               margin: "4px 0 0",
               fontFamily: B.font
             }}>
-              Llevas {fmt(Math.max(bMes, 0))} de los {fmt(salObj)} que te marcaste.
+              Llevas {fmt(Math.max(benefMes, 0))} de los {fmt(salObj)} que te marcaste.
             </p>
           </div>
           {editS ? (
@@ -503,6 +548,63 @@ export default function Dashboard({
           <span>0 €</span>
           <span style={{ color: B.ink, fontWeight: 600 }}>{Math.round(pctSal)}%</span>
           <span>{fmt(salObj)}</span>
+        </div>
+
+        {/* SALARIO MEDIO DEL PERÍODO */}
+        <div style={{
+          marginTop: 22,
+          paddingTop: 18,
+          borderTop: `1px solid ${B.ink}22`,
+          display: "grid",
+          gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+          gap: isMobile ? 16 : 24
+        }}>
+          <div>
+            <Lbl>Salario medio</Lbl>
+            <div style={{
+              fontSize: B.ty.numM,
+              fontWeight: 700,
+              marginTop: 6,
+              color: B.ink,
+              letterSpacing: "-0.02em",
+              fontFamily: B.font,
+              ...B.num
+            }}>
+              {fmt(bMes)}
+            </div>
+            <div style={{
+              fontSize: B.ty.small,
+              color: B.ink,
+              opacity: 0.7,
+              marginTop: 4,
+              fontFamily: B.font
+            }}>
+              Beneficio neto entre {mT} {mT === 1 ? "mes trabajado" : "meses trabajados"}
+            </div>
+          </div>
+          <div>
+            <Lbl>Facturación media</Lbl>
+            <div style={{
+              fontSize: B.ty.numM,
+              fontWeight: 700,
+              marginTop: 6,
+              color: B.ink,
+              letterSpacing: "-0.02em",
+              fontFamily: B.font,
+              ...B.num
+            }}>
+              {fmt(tFact / mT)}
+            </div>
+            <div style={{
+              fontSize: B.ty.small,
+              color: B.ink,
+              opacity: 0.7,
+              marginTop: 4,
+              fontFamily: B.font
+            }}>
+              Antes de gastos e impuestos
+            </div>
+          </div>
         </div>
       </Card>
 
