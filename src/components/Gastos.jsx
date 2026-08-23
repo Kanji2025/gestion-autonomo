@@ -7,7 +7,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   Plus, X, Sparkles, Edit3, Copy, Trash2, Check,
   Calendar, Repeat, Link as LinkIcon, MoreVertical,
-  Receipt, Percent, Hash, Search
+  Receipt, Percent, Hash, Search, BadgeCheck
 } from "lucide-react";
 
 import { B, fmt, hoy, applyF } from "../utils.js";
@@ -195,6 +195,22 @@ const [search, setSearch] = useState("");
   const totalGastos = fg.reduce((s, r) => s + (r.fields["Base Imponible"] || 0), 0);
   const totalIVASoportado = fg.reduce((s, r) => s + (r.fields["IVA Soportado (€)"] || 0), 0);
   const numGastos = fg.length;
+
+  // Deducible / no deducible: se deriva del Gasto Fijo vinculado.
+  // Un gasto sin vínculo (puntual, variable) se considera deducible.
+  const esNoDeducible = (r) => {
+    const ids = r.fields["Gasto Fijo"] || [];
+    if (ids.length === 0) return false;
+    const gf = (gastosFijos || []).find(g => g.id === ids[0]);
+    if (!gf) return false;
+    return (gf.fields["Tipo"] || "Deducible") === "No deducible";
+  };
+
+  const totalNoDeducible = fg
+    .filter(esNoDeducible)
+    .reduce((s, r) => s + (r.fields["Base Imponible"] || 0), 0);
+  const totalDeducible = totalGastos - totalNoDeducible;
+  const numNoDeducibles = fg.filter(esNoDeducible).length;
 
   const prorrateo = calcularProrrateoMensual(gastosFijos);
 
@@ -601,10 +617,10 @@ const [search, setSearch] = useState("");
         />
       </div>
 
-      {/* KPIs DEL PERÍODO — total, IVA soportado, nº de gastos */}
+      {/* KPIs DEL PERÍODO — total, deducible, IVA soportado, nº de gastos */}
       <div style={{
         display: "grid",
-        gridTemplateColumns: isMobile ? "1fr" : "repeat(3, 1fr)",
+        gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(200px, 1fr))",
         gap: 12
       }}>
         <Card>
@@ -625,6 +641,29 @@ const [search, setSearch] = useState("");
           </div>
           <div style={{ fontSize: B.ty.small, color: B.muted, marginTop: 4, fontFamily: B.font }}>
             Del período seleccionado
+          </div>
+        </Card>
+
+        <Card>
+          <IconPill icon={BadgeCheck} />
+          <div style={{ marginTop: 14 }}>
+            <Lbl>Deducibles</Lbl>
+          </div>
+          <div style={{
+            fontSize: B.ty.numL,
+            fontWeight: 700,
+            marginTop: 6,
+            color: B.ink,
+            letterSpacing: "-0.02em",
+            fontFamily: B.font,
+            ...B.num
+          }}>
+            {fmt(totalDeducible)}
+          </div>
+          <div style={{ fontSize: B.ty.small, color: B.muted, marginTop: 4, fontFamily: B.font }}>
+            {totalNoDeducible > 0
+              ? `${fmt(totalNoDeducible)} no deducible${numNoDeducibles === 1 ? "" : "s"}`
+              : "Todo el período es deducible"}
           </div>
         </Card>
 
