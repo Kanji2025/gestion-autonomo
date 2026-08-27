@@ -1,19 +1,27 @@
 // src/components/Alertas.jsx
 // Alertas manuales (Airtable) + automáticas (calculadas en vivo, descartables localmente).
 // REDISEÑO 2026 paleta marca. LÓGICA INTACTA: huellas digitales, fingerprints, generateAutoAlerts.
+// v2: nueva regla automática — seguimientos comerciales vencidos (tabla Presupuestos).
 
 import { useState, useMemo } from "react";
 import {
   Plus, X, Bell, Pin, Sparkles, AlertTriangle, ShieldCheck,
-  Calendar as CalendarIcon, Check, CheckCheck, RotateCcw, Trash2
+  Calendar as CalendarIcon, Check, CheckCheck, RotateCcw, Trash2, Send
 } from "lucide-react";
 
-import { B, fmt, hoy, getTrimestre } from "../utils.js";
+import { B, fmt, hoy, getTrimestre, diasEntre } from "../utils.js";
 import { useResponsive } from "../hooks/useResponsive.js";
 import { createRecord, updateRecord, deleteRecord } from "../api.js";
 import {
   Card, Lbl, Inp, Sel, TxtArea, PageHeader, Btn, IconPill, ErrorBox
 } from "./UI.jsx";
+
+// Fases del CRM que siguen vivas y por tanto necesitan seguimiento.
+// Mismo criterio que ABIERTOS en Presupuestos.jsx.
+const CRM_ABIERTOS = ["Contactado", "Presupuestado"];
+
+// Cuántos nombres se listan en el mensaje antes de resumir con "y N más".
+const MAX_NOMBRES_EN_MENSAJE = 6;
 
 // ============================================================
 // GESTIÓN DE DESCARTES LOCALES (LÓGICA INTACTA)
@@ -61,9 +69,22 @@ export function cleanupDismissed(activeFingerprints) {
 
 // ============================================================
 // GENERAR ALERTAS AUTOMÁTICAS (LÓGICA FISCAL INTACTA)
+//
+// Firma: (ingresos, gastos, tramos, cuotaActual, presupuestos, opts)
+// El 5º argumento acepta tanto el array de presupuestos como el objeto
+// de opciones, para que cualquier llamada con la firma antigua
+// (…, cuotaActual, { ignoreDismissed: true }) siga funcionando.
 // ============================================================
-export function generateAutoAlerts(ingresos, gastos, tramos, cuotaActual = 294, opts = {}) {
-  const { ignoreDismissed = false } = opts;
+export function generateAutoAlerts(ingresos, gastos, tramos, cuotaActual = 294, presupuestos = [], opts = {}) {
+  // Normalización defensiva del 5º argumento
+  let pres = presupuestos;
+  let options = opts;
+  if (!Array.isArray(pres)) {
+    options = pres || {};
+    pres = [];
+  }
+
+  const { ignoreDismissed = false } = options || {};
   const alerts = [];
   const now = new Date();
 
@@ -165,6 +186,72 @@ export function generateAutoAlerts(ingresos, gastos, tramos, cuotaActual = 294, 
     }
   }
 
+  // ---- 4. Seguimientos comerciales vencidos (tabla Presupuestos) ----
+  // Registros vivos (Contactado / Presupuestado) cuyo "Próximo seguimiento"
+  // es hoy o anterior. Si la tabla viene vacía o falló el fetch, pres es []
+  // y este bloque no hace nada.
+  if (pres.length > 0) {
+    const hoyISO = hoy();
+
+    const pendientes = pres
+      .filter(r => {
+        const estado = r.fields?.["Estado"] || "";
+        const seg = r.fields?.["Próximo seguimiento"];
+        if (!CRM_ABIERTOS.includes(estado)) return false;
+        if (!seg) return false;
+        // Airtable puede devolver "YYYY-MM-DD" o ISO con hora: nos quedamos con el día.
+        return String(seg).slice(0, 10) <= hoyISO;
+      })
+      .map(r => {
+        const seg = String(r.fields["Próximo seguimiento"]).slice(0, 10);
+        // diasEntre(hoy, seg) es negativo cuando seg ya pasó → retraso positivo.
+        const retraso = Math.max(0, -diasEntre(hoyISO, seg));
+        return {
+          id: r.id,
+          nombre: r.fields["Nombre"] || "Sin nombre",
+          seg,
+          retraso
+        };
+      })
+      .sort((a, b) => b.retraso - a.retraso);
+
+    if (pendientes.length > 0) {
+      const n = pendientes.length;
+      const plural = n > 1;
+      const maxRetraso = pendientes[0].retraso;
+
+      // Fingerprint por CONJUNTO de registros: la alerta descartada no vuelve
+      // hasta que entre un pendiente nuevo o se resuelva uno de los actuales.
+      const ids = pendientes.map(p => p.id).slice().sort().join(",");
+      const fingerprint = `seguimientos-${n}-${ids}`;
+
+      const listado = pendientes
+        .slice(0, MAX_NOMBRES_EN_MENSAJE)
+        .map(p => {
+          if (p.retraso === 0) return `${p.nombre} (toca hoy)`;
+          return `${p.nombre} (${p.retraso} día${p.retraso > 1 ? "s" : ""} de retraso)`;
+        })
+        .join(", ");
+
+      const resto = n - Math.min(n, MAX_NOMBRES_EN_MENSAJE);
+      const cola = resto > 0 ? ` y ${resto} más` : "";
+
+      const alert = {
+        id: "auto-seguimientos",
+        source: "auto",
+        tipo: "Seguimiento",
+        prioridad: maxRetraso > 7 ? "Alta" : "Media",
+        titulo: `${n} seguimiento${plural ? "s" : ""} pendiente${plural ? "s" : ""}`,
+        mensaje: `Toca escribir a: ${listado}${cola}. ${plural ? "Son contactos vivos" : "Es un contacto vivo"} sin cerrar; cada día de retraso baja las probabilidades de que respondan.`,
+        fecha: hoy(),
+        fingerprint
+      };
+      if (ignoreDismissed || !isAutoDismissed(alert.id, fingerprint)) {
+        alerts.push(alert);
+      }
+    }
+  }
+
   return alerts;
 }
 
@@ -228,6 +315,7 @@ function iconForType(t) {
     case "Factura Vencida": return AlertTriangle;
     case "IVA Trimestre": return CalendarIcon;
     case "Cuota Autónomos": return ShieldCheck;
+    case "Seguimiento": return Send;
     case "Manual": return Pin;
     default: return Bell;
   }
@@ -236,7 +324,7 @@ function iconForType(t) {
 // ============================================================
 // COMPONENTE PRINCIPAL
 // ============================================================
-export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefresh }) {
+export default function AlertasView({ alertas, ingresos, gastos, tramos, presupuestos, onRefresh }) {
   const { isMobile, formColumns } = useResponsive();
 
   const [showAdd, setShowAdd] = useState(false);
@@ -265,8 +353,8 @@ export default function AlertasView({ alertas, ingresos, gastos, tramos, onRefre
   });
 
   const autoAlertsAll = useMemo(() => {
-    return generateAutoAlerts(ingresos, gastos, tramos, cuotaActual, { ignoreDismissed: true });
-  }, [ingresos, gastos, tramos, cuotaActual]);
+    return generateAutoAlerts(ingresos, gastos, tramos, cuotaActual, presupuestos || [], { ignoreDismissed: true });
+  }, [ingresos, gastos, tramos, presupuestos, cuotaActual]);
 
   const dismissedMap = loadDismissed();
   const autoAlertsWithStatus = autoAlertsAll.map(a => ({
