@@ -22,7 +22,7 @@ import {
 // ============================================================
 // CONSTANTES
 // ============================================================
-const CANALES = ["Instagram", "Pinterest", "Malt", "Web", "Referido", "Otro"];
+const CANALES = ["Instagram", "Pinterest", "Malt", "Web", "Referido", "LinkedIn", "Otro"];
 const ORIGENES = ["Me contactan", "Contacto yo"];
 const ESTADOS = ["Contactado", "Presupuestado", "Ganado", "Perdido", "Sin respuesta"];
 
