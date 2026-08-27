@@ -1,5 +1,7 @@
 // src/components/Clientes.jsx
 // Gestión completa de clientes. REDISEÑO 2026 con paleta marca.
+// v2 (AHORRO DE API): tras crear/editar/borrar ya NO se recarga la tabla.
+//   Se usa el registro que devuelve Airtable en la propia respuesta.
 
 import { useState } from "react";
 import {
@@ -37,7 +39,10 @@ function activoEstiloPill(estado) {
 // ============================================================
 // COMPONENTE PRINCIPAL
 // ============================================================
-export default function Clientes({ clientes, ingresos, onRefresh }) {
+export default function Clientes({
+  clientes, ingresos, onRefresh,
+  onUpsert, onRemove, onInvalidate
+}) {
   const { isMobile, formColumns } = useResponsive();
 
   const [sel, setSel] = useState(null);
@@ -62,20 +67,35 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
   const [deletingClient, setDeletingClient] = useState(null);
 
   // ============================================================
+  // HELPERS DE ACTUALIZACIÓN LOCAL
+  // Si por lo que sea no llegan las props nuevas, cae de vuelta
+  // al comportamiento antiguo (recargar) para no romper nada.
+  // ============================================================
+  const aplicarLocal = async (tabla, record) => {
+    if (onUpsert && record && record.id) onUpsert(tabla, record);
+    else if (onRefresh) await onRefresh();
+  };
+
+  const quitarLocal = async (tabla, id) => {
+    if (onRemove) onRemove(tabla, id);
+    else if (onRefresh) await onRefresh();
+  };
+
+  // ============================================================
   // ACCIONES (lógica intacta)
   // ============================================================
   const addCliente = async () => {
     if (!newName.trim()) return;
     setSaving(true);
     try {
-      await createRecord("Clientes", {
+      const created = await createRecord("Clientes", {
         "Nombre": newName.trim(),
         "Estatus": "Activo",
         "Estado": "Al día"
       });
       setNewName("");
       setShowAdd(false);
-      await onRefresh();
+      await aplicarLocal("Clientes", created.records?.[0]);
     } catch (e) {
       alert("Error al crear cliente: " + e.message);
     }
@@ -86,7 +106,7 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
     setDel(id);
     try {
       await deleteRecord("Ingresos", id);
-      await onRefresh();
+      await quitarLocal("Ingresos", id);
     } catch (e) {
       alert("Error al borrar: " + e.message);
     }
@@ -98,8 +118,8 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
     try {
       const fields = { "Estado": nuevoEstado };
       if (nuevoEstado === "Cobrada") fields["Fecha Cobro"] = hoy();
-      await updateRecord("Ingresos", id, fields);
-      await onRefresh();
+      const res = await updateRecord("Ingresos", id, fields);
+      await aplicarLocal("Ingresos", res.records?.[0]);
     } catch (e) {
       alert("Error al actualizar: " + e.message);
     }
@@ -110,13 +130,13 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
     const key = `${fieldName}-${clienteId}`;
     setFieldSaving(key);
     try {
-      await updateRecord("Clientes", clienteId, { [fieldName]: valor });
+      const res = await updateRecord("Clientes", clienteId, { [fieldName]: valor });
       tmpSetter(prev => {
         const next = { ...prev };
         delete next[clienteId];
         return next;
       });
-      await onRefresh();
+      await aplicarLocal("Clientes", res.records?.[0]);
     } catch (e) {
       alert(`Error guardando ${fieldName}: ${e.message}`);
     }
@@ -152,8 +172,8 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
     const nuevoEstatus = estatusActual === "Activo" ? "Inactivo" : "Activo";
     setEstatusSaving(clienteId);
     try {
-      await updateRecord("Clientes", clienteId, { "Estatus": nuevoEstatus });
-      await onRefresh();
+      const res = await updateRecord("Clientes", clienteId, { "Estatus": nuevoEstatus });
+      await aplicarLocal("Clientes", res.records?.[0]);
     } catch (e) {
       alert("Error cambiando estatus: " + e.message);
     }
@@ -163,8 +183,8 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
   const cambiarEstado = async (clienteId, nuevoEstado) => {
     setEstadoSaving(clienteId);
     try {
-      await updateRecord("Clientes", clienteId, { "Estado": nuevoEstado });
-      await onRefresh();
+      const res = await updateRecord("Clientes", clienteId, { "Estado": nuevoEstado });
+      await aplicarLocal("Clientes", res.records?.[0]);
     } catch (e) {
       alert("Error cambiando estado: " + e.message);
     }
@@ -181,7 +201,7 @@ export default function Clientes({ clientes, ingresos, onRefresh }) {
     try {
       await deleteRecord("Clientes", clienteId);
       if (sel === clienteId) setSel(null);
-      await onRefresh();
+      await quitarLocal("Clientes", clienteId);
     } catch (e) {
       alert("Error al borrar cliente: " + e.message);
     }
