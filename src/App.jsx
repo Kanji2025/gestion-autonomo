@@ -8,6 +8,11 @@
 //   - Carga perezosa: Clientes, Gastos Fijos, Presupuestos y Proyectos se piden
 //     solo al entrar en su sección, y se quedan en memoria.
 //   - onRefresh quirúrgico: cada sección recarga SOLO sus tablas (2 en vez de 8).
+// v4 (AHORRO DE API):
+//   - Actualización local: tras crear/editar/borrar NO se recarga nada.
+//     Se usa el registro que devuelve Airtable. Cada acción = 1 llamada.
+// v5: Presupuestos vuelve a la carga inicial (lo necesita la alerta de
+//     seguimiento comercial) y se pasa a generateAutoAlerts.
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
@@ -50,14 +55,16 @@ const POPUP_SHOWN_DATE_KEY = "ga_popup_shown_date";
 // ============================================================
 
 // Tablas que SÍ se cargan al abrir la app (las necesita el dashboard y la campanita)
-const CORE_TABLES = ["Ingresos", "Gastos", "Alertas"];
+// Presupuestos entra aquí porque la alerta de seguimiento comercial tiene que
+// poder saltar en la campanita nada más abrir la app.
+const CORE_TABLES = ["Ingresos", "Gastos", "Alertas", "Presupuestos"];
 
 // Qué tabla necesita cada sección. Se carga la primera vez que entras.
 const PAGE_TABLES = {
   dashboard: [],
   facturas: ["Clientes"],
   clientes: ["Clientes"],
-  presupuestos: ["Presupuestos"],
+  presupuestos: [],
   proyectos: ["Proyectos", "Clientes"],
   gastos: ["Gastos Fijos"],
   gastosfijos: ["Gastos Fijos"],
@@ -352,6 +359,39 @@ export default function App() {
   }, [reload, refreshLocal]);
 
   // ============================================================
+  // ACTUALIZACIÓN LOCAL (0 llamadas a Airtable)
+  // Airtable ya devuelve el registro completo al crear/editar, con las
+  // fórmulas (IVA, IRPF, Total) ya recalculadas. Lo metemos directamente
+  // en la lista que hay en pantalla en vez de volver a pedir la tabla.
+  // ============================================================
+
+  // Inserta el registro si es nuevo, o lo sustituye si ya estaba.
+  const upsertLocal = useCallback((table, record) => {
+    const setter = SETTERS[table];
+    if (!setter || !record || !record.id) return;
+    setter(prev => {
+      const existe = prev.some(r => r.id === record.id);
+      return existe
+        ? prev.map(r => (r.id === record.id ? record : r))
+        : [...prev, record];
+    });
+  }, [SETTERS]);
+
+  // Quita el registro de la lista.
+  const removeLocal = useCallback((table, id) => {
+    const setter = SETTERS[table];
+    if (!setter || !id) return;
+    setter(prev => prev.filter(r => r.id !== id));
+  }, [SETTERS]);
+
+  // Marca una tabla como "caducada": se volverá a pedir la próxima vez
+  // que entres en su sección. Se usa cuando una operación cambia un
+  // vínculo de otra tabla (p. ej. crear una factura cambia el cliente).
+  const invalidate = useCallback((table) => {
+    delete loadedRef.current[table];
+  }, []);
+
+  // ============================================================
   // ALERTAS PENDIENTES
   // ============================================================
   const cuotaActual = (() => {
@@ -361,17 +401,17 @@ export default function App() {
   const pendingAlerts = useMemo(() => {
     if (!auth || loading) return [];
     void bellRefreshCounter;
-    const autoAlerts = generateAutoAlerts(ingresos, gastos, tramos, cuotaActual);
+    const autoAlerts = generateAutoAlerts(ingresos, gastos, tramos, cuotaActual, presupuestos);
     return getPendingAlerts(alertas, autoAlerts);
-  }, [auth, loading, ingresos, gastos, tramos, alertas, cuotaActual, bellRefreshCounter]);
+  }, [auth, loading, ingresos, gastos, tramos, alertas, presupuestos, cuotaActual, bellRefreshCounter]);
 
   useEffect(() => {
     if (!auth || loading) return;
-    const allAutos = generateAutoAlerts(ingresos, gastos, tramos, cuotaActual, { ignoreDismissed: true });
+    const allAutos = generateAutoAlerts(ingresos, gastos, tramos, cuotaActual, presupuestos, { ignoreDismissed: true });
     const activeFingerprints = {};
     allAutos.forEach(a => { activeFingerprints[a.id] = a.fingerprint; });
     cleanupDismissed(activeFingerprints);
-  }, [auth, loading, ingresos, gastos, tramos, cuotaActual]);
+  }, [auth, loading, ingresos, gastos, tramos, presupuestos, cuotaActual]);
 
   useEffect(() => {
     if (!auth || loading || popupCheckedThisSession) return;
@@ -464,11 +504,17 @@ export default function App() {
         return (
           <FacturasView
             ingresos={ingresos} clientes={clientes} onRefresh={refreshFacturas}
+            onUpsert={upsertLocal} onRemove={removeLocal} onInvalidate={invalidate}
             filtro={filtro} setFiltro={setFiltro}
           />
         );
       case "clientes":
-        return <Clientes clientes={clientes} ingresos={ingresos} onRefresh={refreshClientes} />;
+        return (
+          <Clientes
+            clientes={clientes} ingresos={ingresos} onRefresh={refreshClientes}
+            onUpsert={upsertLocal} onRemove={removeLocal} onInvalidate={invalidate}
+          />
+        );
       case "presupuestos":
         return <Presupuestos presupuestos={presupuestos} onRefresh={refreshPresupuestos} />;
       case "proyectos":
@@ -486,6 +532,7 @@ export default function App() {
         return (
           <AlertasView
             alertas={alertas} ingresos={ingresos} gastos={gastos} tramos={tramos}
+            presupuestos={presupuestos}
             onRefresh={refreshAlertas}
           />
         );
