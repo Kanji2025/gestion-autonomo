@@ -1,6 +1,8 @@
 // src/components/Facturas.jsx
 // Sección de Facturas (Ingresos): listado + buscador + edición + duplicado + borrado.
 // REDISEÑO 2026 paleta marca. Mantiene toda la lógica (OCR, duplicar, edit inline).
+// v2 (AHORRO DE API): tras crear/editar/borrar ya NO se recarga la tabla.
+//   Se usa el registro que devuelve Airtable en la propia respuesta.
 
 import { useState, useEffect, useRef } from "react";
 import {
@@ -148,7 +150,11 @@ function KPICard({ icon: Icon, label, value, hint }) {
 // ============================================================
 // COMPONENTE PRINCIPAL
 // ============================================================
-export default function FacturasView({ ingresos, clientes, onRefresh, filtro, setFiltro }) {
+export default function FacturasView({
+  ingresos, clientes, onRefresh,
+  onUpsert, onRemove, onInvalidate,
+  filtro, setFiltro
+}) {
   const { isMobile, formColumns } = useResponsive();
 
   const [showNueva, setShowNueva] = useState(false);
@@ -157,6 +163,28 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
   const [editId, setEditId] = useState(null);
   const [editForm, setEditForm] = useState(null);
   const [savingEdit, setSavingEdit] = useState(false);
+
+  // ============================================================
+  // HELPERS DE ACTUALIZACIÓN LOCAL
+  // Si por lo que sea no llegan las props nuevas, cae de vuelta
+  // al comportamiento antiguo (recargar) para no romper nada.
+  // ============================================================
+  const aplicarLocal = async (record) => {
+    if (onUpsert && record && record.id) onUpsert("Ingresos", record);
+    else if (onRefresh) await onRefresh();
+  };
+
+  const quitarLocal = async (id) => {
+    if (onRemove) onRemove("Ingresos", id);
+    else if (onRefresh) await onRefresh();
+  };
+
+  // Cuando una factura se crea o se borra, el campo "Ingresos" del cliente
+  // vinculado cambia en Airtable. Marcamos Clientes para que se refresque
+  // la próxima vez que se entre en esa sección.
+  const marcarClientes = () => {
+    if (onInvalidate) onInvalidate("Clientes");
+  };
 
   // ============================================================
   // PROCESAR FACTURAS
@@ -254,9 +282,9 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
       if (editForm.iva !== "") fields["IVA (€)"] = Number(editForm.iva);
       if (editForm.irpf !== "") fields["IRPF (€)"] = Number(editForm.irpf);
 
-      await updateRecord("Ingresos", editId, fields);
+      const res = await updateRecord("Ingresos", editId, fields);
       cancelEdit();
-      await onRefresh();
+      await aplicarLocal(res.records?.[0]);
     } catch (e) {
       alert("Error al actualizar: " + e.message);
     }
@@ -271,7 +299,8 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
     setDelId(id);
     try {
       await deleteRecord("Ingresos", id);
-      await onRefresh();
+      await quitarLocal(id);
+      marcarClientes();
     } catch (e) {
       alert("Error al borrar: " + e.message);
     }
@@ -292,7 +321,8 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
       if (f.clienteId) copia["Cliente"] = [f.clienteId];
 
       const created = await createRecord("Ingresos", copia);
-      const nuevoId = created.records?.[0]?.id;
+      const nuevo = created.records?.[0];
+      const nuevoId = nuevo?.id;
 
       if (nuevoId) {
         setEditId(nuevoId);
@@ -308,7 +338,8 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
         });
       }
 
-      await onRefresh();
+      await aplicarLocal(nuevo);
+      if (f.clienteId) marcarClientes();
     } catch (e) {
       alert("Error al duplicar: " + e.message);
     }
@@ -321,8 +352,8 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
     try {
       const fields = { "Estado": nuevoEstado };
       if (nuevoEstado === "Cobrada") fields["Fecha Cobro"] = hoy();
-      await updateRecord("Ingresos", id, fields);
-      await onRefresh();
+      const res = await updateRecord("Ingresos", id, fields);
+      await aplicarLocal(res.records?.[0]);
     } catch (e) {
       alert("Error: " + e.message);
     }
@@ -330,6 +361,8 @@ export default function FacturasView({ ingresos, clientes, onRefresh, filtro, se
 
   // ============================================================
   // FORMULARIO DE NUEVA FACTURA (OCR + IA → NuevoForm)
+  // Aquí SÍ recargamos: NuevoForm puede crear cliente + factura y no
+  // sabemos qué ha tocado exactamente.
   // ============================================================
   if (showNueva) {
     return (
