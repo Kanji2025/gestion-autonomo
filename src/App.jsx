@@ -2,8 +2,14 @@
 // Cerebro principal: routing, autenticación, carga de datos, campanita, pop-up.
 // REDISEÑO 2026: header con KanjiMark + sidebar overlay con iconos lucide.
 // v2: botón ↻ Actualizar en header para reducir llamadas API a Airtable.
+// v3 (AHORRO DE API):
+//   - Carga inicial reducida a 3 tablas (Ingresos, Gastos, Alertas) en vez de 8.
+//   - Tramos de Cotización cacheados en localStorage 30 días → 0 llamadas.
+//   - Carga perezosa: Clientes, Gastos Fijos, Presupuestos y Proyectos se piden
+//     solo al entrar en su sección, y se quedan en memoria.
+//   - onRefresh quirúrgico: cada sección recarga SOLO sus tablas (2 en vez de 8).
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Menu, X, Calendar, LogOut, Bell as BellIcon,
   LayoutDashboard, FileText, Users, Receipt, Repeat,
@@ -38,6 +44,54 @@ import NotificationDropdown from "./components/NotificationDropdown.jsx";
 
 const FONTS_LINK = "https://fonts.googleapis.com/css2?family=Work+Sans:wght@300;400;500;600;700;800&display=swap";
 const POPUP_SHOWN_DATE_KEY = "ga_popup_shown_date";
+
+// ============================================================
+// AHORRO DE API — CONFIGURACIÓN
+// ============================================================
+
+// Tablas que SÍ se cargan al abrir la app (las necesita el dashboard y la campanita)
+const CORE_TABLES = ["Ingresos", "Gastos", "Alertas"];
+
+// Qué tabla necesita cada sección. Se carga la primera vez que entras.
+const PAGE_TABLES = {
+  dashboard: [],
+  facturas: ["Clientes"],
+  clientes: ["Clientes"],
+  presupuestos: ["Presupuestos"],
+  proyectos: ["Proyectos", "Clientes"],
+  gastos: ["Gastos Fijos"],
+  gastosfijos: ["Gastos Fijos"],
+  alertas: [],
+  simulador: [],
+  autonomo: ["Gastos Fijos"]
+};
+
+// Caché de Tramos de Cotización (datos oficiales, cambian 1 vez al año)
+const TRAMOS_CACHE_KEY = "ga_tramos_cache";
+const TRAMOS_TTL_DIAS = 30;
+
+function leerTramosCache() {
+  try {
+    const raw = localStorage.getItem(TRAMOS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.records) || !parsed.ts) return null;
+    const dias = (Date.now() - parsed.ts) / 86400000;
+    if (dias > TRAMOS_TTL_DIAS) return null;
+    return parsed.records;
+  } catch {
+    return null;
+  }
+}
+
+function guardarTramosCache(records) {
+  try {
+    localStorage.setItem(
+      TRAMOS_CACHE_KEY,
+      JSON.stringify({ ts: Date.now(), records })
+    );
+  } catch {}
+}
 
 const MENU_ICONS = {
   LayoutDashboard,
@@ -140,6 +194,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [sectionLoading, setSectionLoading] = useState(false);
 
   const [ingresos, setI] = useState([]);
   const [gastos, setG] = useState([]);
@@ -149,6 +204,10 @@ export default function App() {
   const [proyectos, setPR] = useState([]);
   const [tramos, setT] = useState([]);
   const [alertas, setA] = useState([]);
+
+  // Registro de qué tablas ya se han traído en esta sesión.
+  // Es un ref (no estado) para que no re-dispare renders ni recree callbacks.
+  const loadedRef = useRef({});
 
   const [salObj, setSalObj] = useState(() => {
     try { return Number(localStorage.getItem("ga_salario")) || 2500; }
@@ -170,48 +229,127 @@ export default function App() {
   const { isMobile } = responsive;
 
   // ============================================================
-  // CARGA DE DATOS
-  // silent=false → carga inicial con pantalla completa
-  // silent=true  → recarga silenciosa con icono girando (botón ↻)
+  // MOTOR DE CARGA
   // ============================================================
-  const load = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    else setRefreshing(true);
-    setLoadError("");
-    try {
-      const [i, g, c, t, a, gf, p, pr] = await Promise.all([
-        fetchTable("Ingresos"),
-        fetchTable("Gastos"),
-        fetchTable("Clientes"),
-        fetchTable("Tramos de Cotización"),
-        fetchTable("Alertas").catch(() => []),
-        fetchTable("Gastos Fijos").catch(() => []),
-        fetchTable("Presupuestos").catch(() => []),
-        fetchTable("Proyectos").catch(() => [])
-      ]);
-      setI(i); setG(g); setC(c); setT(t); setA(a); setGF(gf); setP(p); setPR(pr);
-    } catch (e) {
-      console.error("Error cargando datos:", e);
-      setLoadError(e.message || "Error cargando datos");
-      if (e.message && e.message.includes("autorizado")) {
-        logout();
-        setAuth(false);
-      }
+  const SETTERS = useMemo(() => ({
+    "Ingresos": setI,
+    "Gastos": setG,
+    "Clientes": setC,
+    "Gastos Fijos": setGF,
+    "Presupuestos": setP,
+    "Proyectos": setPR,
+    "Alertas": setA
+  }), []);
+
+  const handleFetchError = useCallback((e) => {
+    console.error("Error cargando datos:", e);
+    if (e && e.message && e.message.includes("autorizado")) {
+      logout();
+      setAuth(false);
     }
-    if (!silent) setLoading(false);
-    else setRefreshing(false);
   }, []);
 
-  useEffect(() => { if (auth) load(); }, [auth, load]);
+  // Trae las tablas indicadas y las vuelca en su estado correspondiente.
+  const fetchInto = useCallback(async (tables) => {
+    const unique = [...new Set(tables)].filter(t => SETTERS[t]);
+    if (unique.length === 0) return;
+    const results = await Promise.all(unique.map(t => fetchTable(t)));
+    unique.forEach((t, i) => {
+      SETTERS[t](results[i]);
+      loadedRef.current[t] = true;
+    });
+  }, [SETTERS]);
+
+  // Tramos: primero mira la caché del navegador. Solo llama a Airtable
+  // si no hay caché o si ha caducado (30 días).
+  const cargarTramos = useCallback(async (forzar = false) => {
+    if (!forzar) {
+      const cache = leerTramosCache();
+      if (cache) {
+        setT(cache);
+        return;
+      }
+    }
+    try {
+      const t = await fetchTable("Tramos de Cotización");
+      setT(t);
+      guardarTramosCache(t);
+    } catch (e) {
+      console.warn("No se pudieron cargar los tramos:", e);
+      const cache = leerTramosCache();
+      if (cache) setT(cache);
+    }
+  }, []);
+
+  // Carga inicial: solo lo imprescindible.
+  const loadCore = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      await fetchInto(CORE_TABLES);
+      await cargarTramos();
+    } catch (e) {
+      setLoadError(e.message || "Error cargando datos");
+      handleFetchError(e);
+    }
+    setLoading(false);
+  }, [fetchInto, cargarTramos, handleFetchError]);
+
+  useEffect(() => { if (auth) loadCore(); }, [auth, loadCore]);
+
+  // Recarga silenciosa de tablas concretas (lo usan los onRefresh de cada sección)
+  const reload = useCallback(async (tables) => {
+    setRefreshing(true);
+    try {
+      await fetchInto(tables);
+    } catch (e) {
+      handleFetchError(e);
+    }
+    setRefreshing(false);
+  }, [fetchInto, handleFetchError]);
+
+  // ============================================================
+  // CARGA PEREZOSA POR SECCIÓN
+  // ============================================================
+  useEffect(() => {
+    if (!auth || loading) return;
+    const needed = (PAGE_TABLES[page] || []).filter(t => !loadedRef.current[t]);
+    if (needed.length === 0) return;
+
+    let cancelado = false;
+    setSectionLoading(true);
+    fetchInto(needed)
+      .catch(e => { if (!cancelado) handleFetchError(e); })
+      .finally(() => { if (!cancelado) setSectionLoading(false); });
+
+    return () => { cancelado = true; };
+  }, [page, auth, loading, fetchInto, handleFetchError]);
 
   const refreshLocal = useCallback(() => {
     setBellRefreshCounter(c => c + 1);
   }, []);
 
+  // Botón ↻ del header: recarga SOLO lo que ya se había cargado en esta sesión.
   const refreshAll = useCallback(async () => {
-    await load(true);
+    const cargadas = Object.keys(loadedRef.current);
+    await reload(cargadas.length ? cargadas : CORE_TABLES);
     refreshLocal();
-  }, [load, refreshLocal]);
+  }, [reload, refreshLocal]);
+
+  // ============================================================
+  // REFRESCOS QUIRÚRGICOS POR SECCIÓN
+  // Cada uno recarga solo las tablas que esa pantalla puede tocar.
+  // ============================================================
+  const refreshFacturas = useCallback(() => reload(["Ingresos", "Clientes"]), [reload]);
+  const refreshClientes = useCallback(() => reload(["Clientes", "Ingresos"]), [reload]);
+  const refreshPresupuestos = useCallback(() => reload(["Presupuestos"]), [reload]);
+  const refreshProyectos = useCallback(() => reload(["Proyectos", "Clientes"]), [reload]);
+  const refreshGastos = useCallback(() => reload(["Gastos", "Gastos Fijos"]), [reload]);
+  const refreshGastosFijos = useCallback(() => reload(["Gastos Fijos", "Gastos"]), [reload]);
+  const refreshAlertas = useCallback(async () => {
+    await reload(["Alertas"]);
+    refreshLocal();
+  }, [reload, refreshLocal]);
 
   // ============================================================
   // ALERTAS PENDIENTES
@@ -246,7 +384,7 @@ export default function App() {
 
   const bellCount = pendingAlerts.length;
   const closePopup = () => setPopupAlerts([]);
-  const onAlertDismissed = async () => { await refreshAll(); };
+  const onAlertDismissed = async () => { await refreshAlertas(); };
 
   // ============================================================
   // RENDERS DE BLOQUEO
@@ -274,7 +412,7 @@ export default function App() {
         <div style={{ maxWidth: 480, width: "100%" }}>
           <ErrorBox>{loadError}</ErrorBox>
           <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 16 }}>
-            <Btn onClick={() => load()}>Reintentar</Btn>
+            <Btn onClick={() => loadCore()}>Reintentar</Btn>
             <Btn variant="outline" onClick={() => { logout(); setAuth(false); }}>
               Cerrar sesión
             </Btn>
@@ -288,6 +426,31 @@ export default function App() {
   // RENDER DE LA SECCIÓN ACTIVA
   // ============================================================
   const renderPage = () => {
+    // Mientras se trae por primera vez la tabla de esta sección
+    const pendientes = (PAGE_TABLES[page] || []).filter(t => !loadedRef.current[t]);
+    if (sectionLoading && pendientes.length > 0) {
+      return (
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 10,
+          padding: "80px 20px",
+          color: B.muted,
+          fontFamily: B.font,
+          fontSize: 13,
+          fontWeight: 500
+        }}>
+          <RefreshCw
+            size={16}
+            strokeWidth={2}
+            style={{ animation: "spin 1s linear infinite" }}
+          />
+          Cargando…
+        </div>
+      );
+    }
+
     switch (page) {
       case "dashboard":
         return (
@@ -300,30 +463,30 @@ export default function App() {
       case "facturas":
         return (
           <FacturasView
-            ingresos={ingresos} clientes={clientes} onRefresh={load}
+            ingresos={ingresos} clientes={clientes} onRefresh={refreshFacturas}
             filtro={filtro} setFiltro={setFiltro}
           />
         );
       case "clientes":
-        return <Clientes clientes={clientes} ingresos={ingresos} onRefresh={load} />;
+        return <Clientes clientes={clientes} ingresos={ingresos} onRefresh={refreshClientes} />;
       case "presupuestos":
-        return <Presupuestos presupuestos={presupuestos} onRefresh={load} />;
+        return <Presupuestos presupuestos={presupuestos} onRefresh={refreshPresupuestos} />;
       case "proyectos":
-        return <Proyectos proyectos={proyectos} clientes={clientes} onRefresh={load} />;
+        return <Proyectos proyectos={proyectos} clientes={clientes} onRefresh={refreshProyectos} />;
       case "gastos":
         return (
           <GastosView
-            gastos={gastos} gastosFijos={gastosFijos} onRefresh={load}
+            gastos={gastos} gastosFijos={gastosFijos} onRefresh={refreshGastos}
             filtro={filtro} setFiltro={setFiltro}
           />
         );
       case "gastosfijos":
-        return <GastosFijos gastosFijos={gastosFijos} gastos={gastos} onRefresh={load} />;
+        return <GastosFijos gastosFijos={gastosFijos} gastos={gastos} onRefresh={refreshGastosFijos} />;
       case "alertas":
         return (
           <AlertasView
             alertas={alertas} ingresos={ingresos} gastos={gastos} tramos={tramos}
-            onRefresh={refreshAll}
+            onRefresh={refreshAlertas}
           />
         );
       case "simulador":
@@ -433,7 +596,7 @@ export default function App() {
 
           {/* BOTÓN ACTUALIZAR ↻ — recarga silenciosa sin pantalla de carga */}
           <button
-            onClick={() => { load(true); refreshLocal(); }}
+            onClick={refreshAll}
             disabled={refreshing}
             title="Actualizar datos"
             aria-label="Actualizar"
@@ -605,7 +768,7 @@ export default function App() {
           alertas={pendingAlerts}
           onClose={() => setDropdownOpen(false)}
           onGoToAlerts={() => setPage("alertas")}
-          onChange={refreshAll}
+          onChange={refreshAlertas}
         />
       )}
     </div>
