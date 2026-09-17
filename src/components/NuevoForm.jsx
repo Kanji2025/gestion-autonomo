@@ -260,7 +260,6 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
 
       setProcStep("Extrayendo texto con OCR...");
       const text = await runOCR(b64);
-      console.log("OCR text:", text);
 
       if (!text || text.trim().length < 5) {
         setErr("No se pudo leer el documento. Prueba con una imagen más clara.");
@@ -284,10 +283,9 @@ export default function NuevoForm({ onClose, onSaved, defaultTipo = "ingreso", l
       } else {
         setProcStep("Interpretando con IA...");
         const data = await parseExpense(text);
-        console.log("Datos extraídos por IA:", data);
 
         setRes(data);
-        if (data.fecha) sFecha(data.fecha);
+        sFecha(data.fecha || "");
         if (data.proveedor) sProveedor(data.proveedor);
         if (data.cif) sCif(data.cif);
         if (data.base != null) sBase(String(data.base));

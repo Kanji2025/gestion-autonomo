@@ -193,7 +193,7 @@ export async function runOCR(imageBase64) {
 }
 
 // ============================================================
-// PARSE EXPENSE (Claude Haiku via /api/parse-expense)
+// PARSE EXPENSE (OpenAI via /api/parse-expense; clave solo en el servidor)
 // ============================================================
 export async function parseExpense(ocrText) {
   const data = await callApi("/api/parse-expense", { ocrText });
