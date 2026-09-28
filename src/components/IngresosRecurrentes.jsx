@@ -1,14 +1,14 @@
 import { useMemo, useState } from "react";
 import {
   Plus, X, Check, Edit3, Trash2, CalendarDays, Repeat,
-  UserRound, Clock, ChevronDown
+  UserRound, Clock, ChevronDown, FileText
 } from "lucide-react";
 
 import { B, fmt, hoy, MESES_FULL } from "../utils.js";
 import { useResponsive } from "../hooks/useResponsive.js";
 import { createRecord, updateRecord, deleteRecord } from "../api.js";
 import { monthlyEquivalent, forecastForYear, isActiveInMonth } from "../recurringIncome.js";
-import { Card, Lbl, Inp, Sel, PageHeader, Btn, ErrorBox } from "./UI.jsx";
+import { Card, Lbl, Inp, Sel, TxtArea, PageHeader, Btn, ErrorBox } from "./UI.jsx";
 
 const PERIODICIDADES = ["Mensual", "Trimestral"];
 
@@ -19,7 +19,8 @@ function emptyForm() {
     importe: "",
     periodicidad: "Mensual",
     fechaInicio: hoy(),
-    fechaFin: ""
+    fechaFin: "",
+    notas: ""
   };
 }
 
@@ -89,7 +90,8 @@ export default function IngresosRecurrentes({
       importe: String(fields["Importe base"] ?? ""),
       periodicidad: fields["Periodicidad"] || "Mensual",
       fechaInicio: fields["Fecha primera factura"] || "",
-      fechaFin: fields["Fecha última factura"] || ""
+      fechaFin: fields["Fecha última factura"] || "",
+      notas: fields["Notas"] || ""
     });
     setError("");
     setShowForm(true);
@@ -121,7 +123,8 @@ export default function IngresosRecurrentes({
       "Importe base": amount,
       "Periodicidad": form.periodicidad,
       "Fecha primera factura": form.fechaInicio,
-      "Fecha última factura": form.fechaFin || null
+      "Fecha última factura": form.fechaFin || null,
+      "Notas": form.notas.trim() || null
     };
 
     setSaving(true);
@@ -217,6 +220,15 @@ export default function IngresosRecurrentes({
               <Inp label="Fecha primera factura" value={form.fechaInicio} onChange={value => setForm({ ...form, fechaInicio: value })} type="date" />
               <Inp label="Fecha última factura (opcional)" value={form.fechaFin} onChange={value => setForm({ ...form, fechaFin: value })} type="date" />
             </div>
+            <div style={{ marginTop: 14 }}>
+              <TxtArea
+                label="Condiciones o qué incluye (opcional)"
+                value={form.notas}
+                onChange={value => setForm({ ...form, notas: value })}
+                ph="Ej.: mantenimiento, soporte y dos cambios al mes. Permanencia mínima de tres meses."
+                rows={4}
+              />
+            </div>
             <div style={{ marginTop: 14 }}><ErrorBox>{error}</ErrorBox></div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
               <Btn type="submit" disabled={saving} icon={Check} iconBefore>{saving ? "Guardando…" : "Guardar cuota"}</Btn>
@@ -308,6 +320,12 @@ export default function IngresosRecurrentes({
                               <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><CalendarDays size={12} />Desde {formatDate(fields["Fecha primera factura"])}</span>
                               <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><Clock size={12} />{formatDate(fields["Fecha última factura"])}</span>
                             </div>
+                            {fields["Notas"] && (
+                              <div style={{ display: "flex", gap: 7, alignItems: "flex-start", marginTop: 10, color: B.muted, fontFamily: B.font, fontSize: 12, lineHeight: 1.5 }}>
+                                <FileText size={13} style={{ flexShrink: 0, marginTop: 2 }} />
+                                <span style={{ whiteSpace: "pre-wrap" }}>{fields["Notas"]}</span>
+                              </div>
+                            )}
                           </div>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexShrink: 0 }}>
                             <div style={{ textAlign: isMobile ? "left" : "right" }}>
