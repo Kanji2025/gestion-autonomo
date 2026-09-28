@@ -171,6 +171,19 @@ export default function IngresosRecurrentes({
     return (a.fields["Nombre"] || "").localeCompare(b.fields["Nombre"] || "", "es");
   });
 
+  const clientGroups = Object.values(records.reduce((groups, record) => {
+    const clientId = (record.fields?.["Cliente"] || [])[0] || "sin-cliente";
+    if (!groups[clientId]) {
+      groups[clientId] = {
+        clientId,
+        clientName: clientMap[clientId] || "Cliente eliminado",
+        records: []
+      };
+    }
+    groups[clientId].records.push(record);
+    return groups;
+  }, {})).sort((a, b) => a.clientName.localeCompare(b.clientName, "es"));
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
       <PageHeader
@@ -251,44 +264,66 @@ export default function IngresosRecurrentes({
       </Card>
 
       <Card>
-        <Lbl>Cuotas registradas ({records.length})</Lbl>
+        <Lbl>Clientes con cuotas ({clientGroups.length})</Lbl>
         {records.length === 0 ? (
           <p style={{ margin: "18px 0 0", color: B.muted, fontFamily: B.font, fontSize: 14, textAlign: "center", padding: 18 }}>
             Todavía no hay cuotas recurrentes.
           </p>
         ) : (
-          <div style={{ marginTop: 12 }}>
-            {records.map(record => {
-              const fields = record.fields || {};
-              const status = statusFor(record);
-              const clientId = (fields["Cliente"] || [])[0];
-              const amount = Number(fields["Importe base"]) || 0;
-              const monthlyAmount = fields["Periodicidad"] === "Trimestral" ? amount / 3 : amount;
+          <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 16 }}>
+            {clientGroups.map(group => {
+              const groupMonthly = monthlyEquivalent(group.records);
               return (
-                <div key={record.id} style={{ display: "flex", flexDirection: isMobile ? "column" : "row", justifyContent: "space-between", gap: 14, padding: "16px 0", borderBottom: `1px solid ${B.border}`, opacity: status === "Finalizada" ? 0.58 : 1 }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                      <strong style={{ fontFamily: B.font, fontSize: 15 }}>{fields["Nombre"] || "Sin nombre"}</strong>
-                      <span style={{ borderRadius: 999, background: status === "Activa" ? B.lavender : "#f4f4f4", padding: "3px 8px", fontFamily: B.font, fontSize: 11, fontWeight: 600 }}>{status}</span>
+                <section key={group.clientId} style={{ border: `1px solid ${B.border}`, borderRadius: 16, overflow: "hidden" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, flexWrap: "wrap", padding: "15px 16px", background: "#f7f7f7" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+                      <UserRound size={17} />
+                      <div>
+                        <strong style={{ display: "block", fontFamily: B.font, fontSize: 16 }}>{group.clientName}</strong>
+                        <span style={{ color: B.muted, fontFamily: B.font, fontSize: 12 }}>
+                          {group.records.length} {group.records.length === 1 ? "cuota registrada" : "cuotas registradas"}
+                        </span>
+                      </div>
                     </div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 16px", marginTop: 8, color: B.muted, fontFamily: B.font, fontSize: 12 }}>
-                      <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><UserRound size={12} />{clientMap[clientId] || "Cliente eliminado"}</span>
-                      <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><Repeat size={12} />{fields["Periodicidad"] || "Mensual"}</span>
-                      <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><CalendarDays size={12} />Desde {formatDate(fields["Fecha primera factura"])}</span>
-                      <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><Clock size={12} />{formatDate(fields["Fecha última factura"])}</span>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontFamily: B.font, fontSize: 17, fontWeight: 700, ...B.num }}>{fmt(groupMonthly)}</div>
+                      <div style={{ fontFamily: B.font, fontSize: 11, color: B.muted }}>al mes equivalente</div>
                     </div>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexShrink: 0 }}>
-                    <div style={{ textAlign: isMobile ? "left" : "right" }}>
-                      <div style={{ fontFamily: B.font, fontSize: 17, fontWeight: 700, ...B.num }}>{fmt(amount)}</div>
-                      <div style={{ fontFamily: B.font, fontSize: 11, color: B.muted }}>{fmt(monthlyAmount)} / mes equivalente</div>
-                    </div>
-                    <Btn size="sm" variant="outline" onClick={() => openEdit(record)} icon={Edit3} iconBefore>Editar</Btn>
-                    <button onClick={() => remove(record)} disabled={deleting === record.id} aria-label={`Borrar ${fields["Nombre"] || "cuota"}`} style={{ background: "transparent", border: "none", padding: 7, cursor: "pointer", color: B.danger }}>
-                      <Trash2 size={15} />
-                    </button>
+                  <div style={{ padding: "0 16px" }}>
+                    {group.records.map((record, index) => {
+                      const fields = record.fields || {};
+                      const status = statusFor(record);
+                      const amount = Number(fields["Importe base"]) || 0;
+                      const monthlyAmount = fields["Periodicidad"] === "Trimestral" ? amount / 3 : amount;
+                      return (
+                        <div key={record.id} style={{ display: "flex", flexDirection: isMobile ? "column" : "row", justifyContent: "space-between", gap: 14, padding: "16px 0", borderBottom: index < group.records.length - 1 ? `1px solid ${B.border}` : "none", opacity: status === "Finalizada" ? 0.58 : 1 }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                              <strong style={{ fontFamily: B.font, fontSize: 15 }}>{fields["Nombre"] || "Sin nombre"}</strong>
+                              <span style={{ borderRadius: 999, background: status === "Activa" ? B.lavender : "#f4f4f4", padding: "3px 8px", fontFamily: B.font, fontSize: 11, fontWeight: 600 }}>{status}</span>
+                            </div>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 16px", marginTop: 8, color: B.muted, fontFamily: B.font, fontSize: 12 }}>
+                              <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><Repeat size={12} />{fields["Periodicidad"] || "Mensual"}</span>
+                              <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><CalendarDays size={12} />Desde {formatDate(fields["Fecha primera factura"])}</span>
+                              <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><Clock size={12} />{formatDate(fields["Fecha última factura"])}</span>
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexShrink: 0 }}>
+                            <div style={{ textAlign: isMobile ? "left" : "right" }}>
+                              <div style={{ fontFamily: B.font, fontSize: 17, fontWeight: 700, ...B.num }}>{fmt(amount)}</div>
+                              <div style={{ fontFamily: B.font, fontSize: 11, color: B.muted }}>{fmt(monthlyAmount)} / mes equivalente</div>
+                            </div>
+                            <Btn size="sm" variant="outline" onClick={() => openEdit(record)} icon={Edit3} iconBefore>Editar</Btn>
+                            <button onClick={() => remove(record)} disabled={deleting === record.id} aria-label={`Borrar ${fields["Nombre"] || "cuota"}`} style={{ background: "transparent", border: "none", padding: 7, cursor: "pointer", color: B.danger }}>
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                </div>
+                </section>
               );
             })}
           </div>
