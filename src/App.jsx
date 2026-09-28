@@ -18,7 +18,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Menu, X, Calendar, LogOut, Bell as BellIcon,
   LayoutDashboard, FileText, Users, Receipt, Repeat,
-  Bell, Calculator, ShieldCheck, RefreshCw, Send, Briefcase
+  Bell, Calculator, ShieldCheck, RefreshCw, Send, Briefcase, CalendarDays
 } from "lucide-react";
 
 import { B, MENU } from "./utils.js";
@@ -34,6 +34,7 @@ import AlertPopup from "./components/AlertPopup.jsx";
 import Dashboard from "./components/Dashboard.jsx";
 import FacturasView from "./components/Facturas.jsx";
 import Clientes from "./components/Clientes.jsx";
+import IngresosRecurrentes from "./components/IngresosRecurrentes.jsx";
 import Presupuestos from "./components/Presupuestos.jsx";
 import Proyectos from "./components/Proyectos.jsx";
 import GastosView from "./components/Gastos.jsx";
@@ -64,6 +65,7 @@ const PAGE_TABLES = {
   dashboard: [],
   facturas: ["Clientes"],
   clientes: ["Clientes"],
+  recurrentes: ["Ingresos recurrentes", "Clientes"],
   presupuestos: [],
   proyectos: ["Proyectos", "Clientes"],
   gastos: ["Gastos Fijos"],
@@ -104,6 +106,7 @@ const MENU_ICONS = {
   LayoutDashboard,
   FileText,
   Users,
+  CalendarDays,
   Send,
   Briefcase,
   Receipt,
@@ -207,6 +210,7 @@ export default function App() {
   const [gastos, setG] = useState([]);
   const [gastosFijos, setGF] = useState([]);
   const [clientes, setC] = useState([]);
+  const [recurrentes, setR] = useState([]);
   const [presupuestos, setP] = useState([]);
   const [proyectos, setPR] = useState([]);
   const [tramos, setT] = useState([]);
@@ -242,6 +246,7 @@ export default function App() {
     "Ingresos": setI,
     "Gastos": setG,
     "Clientes": setC,
+    "Ingresos recurrentes": setR,
     "Gastos Fijos": setGF,
     "Presupuestos": setP,
     "Proyectos": setPR,
@@ -349,6 +354,7 @@ export default function App() {
   // ============================================================
   const refreshFacturas = useCallback(() => reload(["Ingresos", "Clientes"]), [reload]);
   const refreshClientes = useCallback(() => reload(["Clientes", "Ingresos"]), [reload]);
+  const refreshRecurrentes = useCallback(() => reload(["Ingresos recurrentes", "Clientes"]), [reload]);
   const refreshPresupuestos = useCallback(() => reload(["Presupuestos"]), [reload]);
   const refreshProyectos = useCallback(() => reload(["Proyectos", "Clientes"]), [reload]);
   const refreshGastos = useCallback(() => reload(["Gastos", "Gastos Fijos"]), [reload]);
@@ -513,6 +519,13 @@ export default function App() {
           <Clientes
             clientes={clientes} ingresos={ingresos} onRefresh={refreshClientes}
             onUpsert={upsertLocal} onRemove={removeLocal} onInvalidate={invalidate}
+          />
+        );
+      case "recurrentes":
+        return (
+          <IngresosRecurrentes
+            recurrentes={recurrentes} clientes={clientes} onRefresh={refreshRecurrentes}
+            onUpsert={upsertLocal} onRemove={removeLocal}
           />
         );
       case "presupuestos":

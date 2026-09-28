@@ -241,7 +241,7 @@ export function PBar({ value, max, label, color }) {
 // ============================================================
 // INPUT — bordes finos, focus en negro
 // ============================================================
-export function Inp({ label, value, onChange, type = "text", ph = "", onKey }) {
+export function Inp({ label, value, onChange, type = "text", ph = "", onKey, step, min }) {
   return (
     <div>
       {label && (
@@ -264,6 +264,8 @@ export function Inp({ label, value, onChange, type = "text", ph = "", onKey }) {
         onChange={e => onChange(e.target.value)}
         placeholder={ph}
         onKeyDown={onKey}
+        step={step}
+        min={min}
         style={{ ...B.inp, ...B.num }}
         onFocus={e => (e.target.style.borderColor = B.ink)}
         onBlur={e => (e.target.style.borderColor = B.border)}
